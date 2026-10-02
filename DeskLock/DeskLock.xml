@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<GMA3 DataVersion="1.9.3.3">
+	<Plugin Name="DeskLock" Version="1.0.0.0">
+		<ComponentLua Name="DeskLock" FileName="DeskLock.lua" />
+	</Plugin>
+</GMA3>

@@ -1,3 +1,12 @@
+# grandMA3 plugins
+
+| Plugin | |
+|---|---|
+| [Pixel Grid Builder](#pixel-grid-builder-for-grandma3) | Selection grids and layouts for pixel fixtures |
+| [DeskLock](DeskLock/README.md) | Locks the desk behind its own picture on every screen, with PIN unlock, hard lock and pixel-exact templates per screen |
+
+Tests: `lua tests/run_tests.lua` and `lua tests/run_desklock_tests.lua`.
+
 # Pixel Grid Builder for grandMA3
 
 A grandMA3 Lua plugin that builds **selection grids** (stored as groups) and **layout views** for multi-instance pixel fixtures. It handles pixel washes, pixel lines and bars, matrices, multi-row strobe bars like the Chauvet Color STRIKE M, and any other pixel arrangement you can type.
