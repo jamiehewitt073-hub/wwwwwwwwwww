@@ -20,11 +20,35 @@ A grandMA3 Lua plugin that locks the desk behind a full-screen picture on **ever
 
 ## Install
 
-1. Copy `DeskLock.xml` and `DeskLock.lua` to `grandMA3/gma3_library/datapools/plugins/` on a USB stick, or to the same folder of your onPC install.
+1. Copy `DeskLock.xml` and `DeskLock.lua` into the plugins folder:
+   - **onPC on Windows:** `C:\ProgramData\MALightingTechnology\gma3_library\datapools\plugins\` (`ProgramData` is hidden: paste the path into the Explorer address bar)
+   - **onPC on macOS:** `~/MALightingTechnology/gma3_library/datapools/plugins/`
+   - **Console:** `grandMA3/gma3_library/datapools/plugins/` on a USB stick
 2. On the desk, edit an empty slot in the **Plugins** pool → **Import** → *DeskLock*.
 3. Tap the plugin to open its menu.
 
 **Run the Test lock in onPC with your show before using it on a real desk.** See *What to check on onPC* below.
+
+## Screen resolutions
+
+These are the native sizes of each console's internal screens, from MA Lighting's grandMA3 technical data. Make every picture **exactly** this size. Ready-made templates for each console are in [`templates/`](templates/).
+
+| Display | full-size | light | compact XT |
+|---|---|---|---|
+| 1 – Main | 1920 × 1080 | 1920 × 1080 | 1920 × 1080 |
+| 2 – Main | 1920 × 1080 | 1920 × 1080 | 1920 × 1080 |
+| 3 – Main | 1920 × 1080 | – | – |
+| 6 – Command (right) | 800 × 480 | 800 × 480 | – |
+| 7 – Command (left) | 800 × 480 | 800 × 480 | – |
+| 8 – Letterbox (encoders) | 1280 × 242 | 1280 × 242 | – |
+| 9 – Letterbox (executors) | 1280 × 242 | 1280 × 242 | – |
+| 10 – Letterbox (executors) | 1280 × 242 | – | – |
+| External monitors | 1920 × 1080 | 1920 × 1080 | 1920 × 1080 |
+
+- The PIN pad (360 × 520) only fits on the 1920 × 1080 screens. The command and letterbox screens show only their picture, and tapping one brings the pad up on a main screen.
+- The letterbox height is **242**, not 240.
+- The same table is in the plugin: **Screen sizes** and **Export templates** let you pick *grandMA3 full-size / light / compact XT* as well as *this desk*. That's useful in onPC, where the measured sizes are those of your onPC windows.
+- Run **Screen sizes → This desk** once on the real console to confirm the display numbers match.
 
 ## Making the pictures (pixel-perfect)
 

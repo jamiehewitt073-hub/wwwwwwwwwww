@@ -1,0 +1,13 @@
+grandMA3 full-size - make each picture EXACTLY this size (pixels):
+
+Display 1   Main 1                1920 x 1080   (16:9)  + PIN pad
+Display 2   Main 2                1920 x 1080   (16:9)  + PIN pad
+Display 3   Main 3                1920 x 1080   (16:9)  + PIN pad
+Display 6   Command right          800 x 480    (5:3)
+Display 7   Command left           800 x 480    (5:3)
+Display 8   Letterbox encoder     1280 x 242    (5.289:1)
+Display 9   Letterbox exec right  1280 x 242    (5.289:1)
+Display 10  Letterbox exec left   1280 x 242    (5.289:1)
+
+PIN pad: 360 x 520 px in the centre of the PIN pad screen.
+Native screen sizes of the grandMA3 full-size. External monitors: 1920 x 1080.

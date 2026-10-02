@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="480" viewBox="0 0 800 480">
+  <title>Display 6 Command right - 800 x 480 px</title>
+  <g id="artwork">
+    <rect x="0" y="0" width="800" height="480" fill="#101418"/>
+  </g>
+  <g id="guides" fill="none" stroke-width="1">
+    <rect x="0.5" y="0.5" width="799" height="479" stroke="#ff3b30"/>
+    <rect x="40.5" y="24.5" width="719" height="431" stroke="#ffcc00" stroke-dasharray="8 6"/>
+    <line x1="400" y1="0" x2="400" y2="480" stroke="#3a7bd5"/>
+    <line x1="0" y1="240" x2="800" y2="240" stroke="#3a7bd5"/>
+    <text x="400" y="225" fill="#ffffff" stroke="none" font-family="sans-serif" font-size="26" text-anchor="middle">Display 6 - 800 x 480 px</text>
+    <text x="400" y="266" fill="#ffffff" stroke="none" font-family="sans-serif" font-size="15" text-anchor="middle">Command right (5:3)</text>
+  </g>
+</svg>

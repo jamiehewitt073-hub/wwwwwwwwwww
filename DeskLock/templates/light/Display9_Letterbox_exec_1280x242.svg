@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="242" viewBox="0 0 1280 242">
+  <title>Display 9 Letterbox exec - 1280 x 242 px</title>
+  <g id="artwork">
+    <rect x="0" y="0" width="1280" height="242" fill="#101418"/>
+  </g>
+  <g id="guides" fill="none" stroke-width="1">
+    <rect x="0.5" y="0.5" width="1279" height="241" stroke="#ff3b30"/>
+    <rect x="64.5" y="12.5" width="1151" height="217" stroke="#ffcc00" stroke-dasharray="8 6"/>
+    <line x1="640" y1="0" x2="640" y2="242" stroke="#3a7bd5"/>
+    <line x1="0" y1="121" x2="1280" y2="121" stroke="#3a7bd5"/>
+    <text x="640" y="114" fill="#ffffff" stroke="none" font-family="sans-serif" font-size="13" text-anchor="middle">Display 9 - 1280 x 242 px</text>
+    <text x="640" y="134" fill="#ffffff" stroke="none" font-family="sans-serif" font-size="7" text-anchor="middle">Letterbox exec (5.289:1)</text>
+  </g>
+</svg>

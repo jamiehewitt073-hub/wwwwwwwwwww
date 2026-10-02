@@ -68,6 +68,30 @@ local SETTINGS = {
   debug = false,
 }
 
+--------------------------------------------------------------------------------
+-- CONSOLE SCREENS
+-- Native resolution of every internal screen, by display number, from MA
+-- Lighting's grandMA3 technical data. Used to make templates for a desk you
+-- are not sitting at (for example while working in onPC). External monitors
+-- are 1920 x 1080.
+--------------------------------------------------------------------------------
+local CONSOLES = {
+  { key = "full-size", label = "grandMA3 full-size", screens = {
+    { 1, "Main 1", 1920, 1080 }, { 2, "Main 2", 1920, 1080 }, { 3, "Main 3", 1920, 1080 },
+    { 6, "Command right", 800, 480 }, { 7, "Command left", 800, 480 },
+    { 8, "Letterbox encoder", 1280, 242 }, { 9, "Letterbox exec right", 1280, 242 },
+    { 10, "Letterbox exec left", 1280, 242 },
+  } },
+  { key = "light", label = "grandMA3 light", screens = {
+    { 1, "Main 1", 1920, 1080 }, { 2, "Main 2", 1920, 1080 },
+    { 6, "Command right", 800, 480 }, { 7, "Command left", 800, 480 },
+    { 8, "Letterbox encoder", 1280, 242 }, { 9, "Letterbox exec", 1280, 242 },
+  } },
+  { key = "compact-xt", label = "grandMA3 compact XT", screens = {
+    { 1, "Main 1", 1920, 1080 }, { 2, "Main 2", 1920, 1080 },
+  } },
+}
+
 local VAR = "PDL_"            -- prefix of the global variables the plugin keeps
 local OVERLAY_NAME = "DeskLockOverlay"
 
@@ -1072,9 +1096,27 @@ end
 --------------------------------------------------------------------------------
 local Templates = {}
 
-function Templates.rows()
+function Templates.console(key)
+  for _, c in ipairs(CONSOLES) do if c.key == key then return c end end
+  return nil
+end
+
+-- Screens of a console model, shaped like collectScreens() returns them.
+local function consoleScreens(console)
+  local screens = {}
+  for _, e in ipairs(console.screens) do
+    local sc = Config.screen(e[1])
+    local app, label = MA.appearance(sc.app)
+    screens[#screens + 1] = { index = e[1], name = e[2], w = e[3], h = e[4],
+                              cfg = sc, app = app, appLabel = label or sc.app }
+  end
+  return screens
+end
+
+-- console: a CONSOLES entry, or nil for the displays of this desk / onPC.
+function Templates.rows(console)
   local cfg = Config.load()
-  local screens = collectScreens()
+  local screens = console and consoleScreens(console) or collectScreens()
   local padOk = Geo.padScreens(screens, cfg)
   local rows = {}
   for _, s in ipairs(screens) do
@@ -1092,10 +1134,11 @@ function Templates.rows()
   return rows
 end
 
-function Templates.report(rows)
+function Templates.report(rows, console)
   local lines = { "Make each picture EXACTLY this size (pixels):", "" }
+  if console then lines[1] = console.label .. " - make each picture EXACTLY this size (pixels):" end
   for _, r in ipairs(rows) do
-    lines[#lines + 1] = string.format("Display %d  %-14s %5d x %-5d  (%s)%s",
+    lines[#lines + 1] = string.format("Display %-2d  %-20s %5d x %-5d  (%s)%s",
       r.index, r.name, r.w, r.h, r.aspect, r.pad and "  + PIN pad" or "")
     if r.app then
       local note = ""
@@ -1112,7 +1155,11 @@ function Templates.report(rows)
   lines[#lines + 1] = ""
   lines[#lines + 1] = string.format("PIN pad: %d x %d px in the centre of the PIN pad screen.",
     SETTINGS.padWidth, SETTINGS.padHeight)
-  lines[#lines + 1] = "Sizes are read from this desk / onPC. Run this on the desk you lock."
+  if console then
+    lines[#lines + 1] = "Native screen sizes of the " .. console.label .. ". External monitors: 1920 x 1080."
+  else
+    lines[#lines + 1] = "Sizes are read from this desk / onPC. Run this on the desk you lock."
+  end
   return table.concat(lines, "\n")
 end
 
@@ -1171,10 +1218,14 @@ function Templates.fileName(r)
   return string.format("Display%d_%s_%dx%d.svg", r.index, U.fileSafe(r.name), r.w, r.h)
 end
 
-function Templates.export(dir)
-  local rows = Templates.rows()
+function Templates.export(dir, console)
+  local rows = Templates.rows(console)
   local sep = dir:find("\\", 1, true) and "\\" or "/"
   local folder = dir:gsub("[/\\]+$", "") .. sep .. "desklock_templates"
+  if console then
+    MA.mkdir(folder)
+    folder = folder .. sep .. console.key
+  end
   if not MA.mkdir(folder) then
     local probe = io.open(folder .. sep .. ".probe", "wb")
     if probe then probe:close(); pcall(os.remove, folder .. sep .. ".probe")
@@ -1184,7 +1235,7 @@ function Templates.export(dir)
   local ok, err = MA.writeFile(folder .. sep .. "screens.csv", Templates.csv(rows))
   if not ok then return nil, err end
   written[#written + 1] = "screens.csv"
-  MA.writeFile(folder .. sep .. "screens.txt", Templates.report(rows) .. "\n")
+  MA.writeFile(folder .. sep .. "screens.txt", Templates.report(rows, console) .. "\n")
   written[#written + 1] = "screens.txt"
   for _, r in ipairs(rows) do
     local name = Templates.fileName(r)
@@ -1423,18 +1474,39 @@ local function screensMenu()
   end
 end
 
-local function sizesDialog()
-  local rows = Templates.rows()
-  local text = Templates.report(rows)
+-- Which screens: this desk / onPC, or one of the console models.
+-- Returns false when cancelled, "desk" for this desk, else a CONSOLES entry.
+local function chooseConsole(title)
+  local items = { "This desk / onPC (measured now)" }
+  for i, c in ipairs(CONSOLES) do items[i + 1] = c.label end
+  local choice = UI.choose(title, items)
+  if not choice then return false end
+  for i, c in ipairs(CONSOLES) do if items[i + 1] == choice then return c end end
+  return "desk"
+end
+
+local function asConsole(c) if type(c) == "table" then return c end return nil end
+
+local function sizesDialog(console)
+  if console == nil then
+    console = chooseConsole(TITLE .. " - screen sizes for")
+    if console == false then return end
+  end
+  local rows = Templates.rows(asConsole(console))
+  local text = Templates.report(rows, asConsole(console))
   MA.log("screen sizes:\n%s", text)
   local ok, res = pcall(MessageBox, {
     title = TITLE .. " - screen sizes", message = text,
     commands = { { value = 2, name = "Export templates" }, { value = 1, name = "OK" } },
   })
-  if ok and type(res) == "table" and res.result == 2 then return "export" end
+  if ok and type(res) == "table" and res.result == 2 then return "export", console end
 end
 
-local function exportDialog()
+local function exportDialog(console)
+  if console == nil then
+    console = chooseConsole(TITLE .. " - templates for")
+    if console == false then return end
+  end
   local targets = MA.exportTargets()
   if #targets == 0 then return UI.message(TITLE, "No folder to write to was found.") end
   local target = targets[1]
@@ -1445,7 +1517,7 @@ local function exportDialog()
     if not choice then return end
     for i, t in ipairs(targets) do if items[i] == choice then target = t end end
   end
-  local folder, written = Templates.export(target.path)
+  local folder, written = Templates.export(target.path, asConsole(console))
   if not folder then return UI.message(TITLE, "Export failed: " .. tostring(written)) end
   MA.log("templates written to %s", folder)
   UI.message(TITLE, "Written to\n" .. folder .. "\n\n" .. table.concat(written, "\n")
@@ -1515,7 +1587,9 @@ local function menu()
     if not choice then return end
     if choice == items[1] then return lockNow(false)
     elseif choice == items[2] then lockNow(true)
-    elseif choice == items[3] then if sizesDialog() == "export" then exportDialog() end
+    elseif choice == items[3] then
+      local action, console = sizesDialog()
+      if action == "export" then exportDialog(console) end
     elseif choice == items[4] then exportDialog()
     elseif choice == items[5] then screensMenu()
     elseif choice == items[6] then securityDialog()
@@ -1543,7 +1617,11 @@ local function Main(displayHandle, argument)
   end
   if arg == "lock" then return lockNow(false) end
   if arg == "test" then return lockNow(true) end
-  if arg == "sizes" then if sizesDialog() == "export" then exportDialog() end return end
+  if arg == "sizes" then
+    local action, console = sizesDialog()
+    if action == "export" then exportDialog(console) end
+    return
+  end
   return menu()
 end
 
@@ -1586,6 +1664,7 @@ end
 if type(DESKLOCK_TEST_HOOK) == "table" then
   local H = DESKLOCK_TEST_HOOK
   H.U, H.Hash, H.MA, H.Config, H.Geo, H.Lock, H.Templates, H.SETTINGS = U, Hash, MA, Config, Geo, Lock, Templates, SETTINGS
+  H.CONSOLES = CONSOLES
   H.armAutoLock, H.signalTable = armAutoLock, signalTable
   H.state = function() return L end
 end

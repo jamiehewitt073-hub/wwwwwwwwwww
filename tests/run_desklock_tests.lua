@@ -471,5 +471,31 @@ test("screen preview shows one screen and closes itself", function()
   eq(H.Config.screen(2).app, "Logo")
 end)
 
+test("console models: full-size, light, compact XT sizes", function()
+  local _, _, H = load()
+  local fs = H.Templates.rows(H.Templates.console("full-size"))
+  eq(#fs, 8)
+  local byIndex = {}
+  for _, r in ipairs(fs) do byIndex[r.index] = r end
+  eq(byIndex[3].w, 1920); eq(byIndex[3].h, 1080); eq(byIndex[3].pad, true)
+  eq(byIndex[6].w, 800); eq(byIndex[6].h, 480); eq(byIndex[6].pad, false, "pad does not fit 800x480")
+  eq(byIndex[10].w, 1280); eq(byIndex[10].h, 242)
+  eq(#H.Templates.rows(H.Templates.console("light")), 6)
+  eq(#H.Templates.rows(H.Templates.console("compact-xt")), 2)
+  contains(H.Templates.report(fs, H.Templates.console("full-size")), "grandMA3 full-size")
+end)
+
+test("export for a console model goes to its own folder", function()
+  local S, main = load()
+  local dir = os.tmpname(); os.remove(dir)
+  os.execute('mkdir -p "' .. dir .. '"')
+  S.library = dir
+  S.popups = { mock.pick("Export content templates"), mock.pick("grandMA3 light"), function() return nil end }
+  run(main, S, nil)
+  local f = assert(io.open(dir .. "/desklock_templates/light/Display8_Letterbox_encoder_1280x242.svg"))
+  contains(f:read("a"), 'width="1280" height="242"'); f:close()
+  os.execute('rm -rf "' .. dir .. '"')
+end)
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

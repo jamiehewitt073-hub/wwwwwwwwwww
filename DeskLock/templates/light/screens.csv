@@ -1,0 +1,7 @@
+display,name,width_px,height_px,aspect,pin_pad,pad_x,pad_y,pad_w,pad_h,appearance
+1,"Main 1",1920,1080,16:9,yes,780,280,360,520,""
+2,"Main 2",1920,1080,16:9,yes,780,280,360,520,""
+6,"Command right",800,480,5:3,no,,,,,""
+7,"Command left",800,480,5:3,no,,,,,""
+8,"Letterbox encoder",1280,242,5.289:1,no,,,,,""
+9,"Letterbox exec",1280,242,5.289:1,no,,,,,""
