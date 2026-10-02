@@ -1,6 +1,6 @@
 --[[
 ================================================================================
-  DESKLOCK - grandMA3 plugin                                            v1.0.0
+  DESKLOCK - grandMA3 plugin                                            v1.1.0
 ================================================================================
   Locks the desk behind a full-screen picture on EVERY screen (main screens,
   command screen, letterbox, onPC windows ...). Each screen shows its own
@@ -33,7 +33,7 @@ local componentName = select(2, ...)
 local signalTable   = select(3, ...)
 local myHandle      = select(4, ...)
 
-local VERSION = "1.0.0"
+local VERSION = "1.1.0"
 local TITLE = "DeskLock"
 
 --------------------------------------------------------------------------------
@@ -198,8 +198,10 @@ end
 
 function MA.sleep(seconds)
   -- grandMA3 plugins wait with coroutine.yield(seconds).
-  local ok = pcall(coroutine.yield, seconds)
-  return ok
+  local can = coroutine.isyieldable and coroutine.isyieldable()
+  if can == false then return false end
+  if can then coroutine.yield(seconds) return true end
+  return (pcall(coroutine.yield, seconds))
 end
 
 -- Reads a property, nil on any error.
@@ -215,6 +217,15 @@ function MA.set(obj, key, value)
   if obj == nil then return false end
   local ok = pcall(function() obj[key] = value end)
   return ok
+end
+
+-- Does this console object still exist?
+function MA.valid(obj)
+  if obj == nil then return false end
+  local ok, v = pcall(IsObjectValid, obj)
+  if ok and type(v) == "boolean" then return v end
+  local okW, w = pcall(function() return obj.W end)
+  return okW and w ~= nil
 end
 
 function MA.children(obj)
@@ -457,6 +468,8 @@ function Config.load()
   c.pinHash = MA.getVar("PinHash"); if c.pinHash == "" then c.pinHash = nil end
   c.adminHash = MA.getVar("AdminHash"); if c.adminHash == "" then c.adminHash = nil end
   c.salt = MA.getVar("PinSalt") or ""
+  c.pinLen = c.pinHash and tonumber(MA.getVar("PinLen")) or nil
+  c.adminLen = c.adminHash and tonumber(MA.getVar("AdminLen")) or nil
   return c
 end
 
@@ -498,13 +511,15 @@ function Config.setPin(pin)
   local salt = MA.getVar("PinSalt")
   if salt == nil or salt == "" then salt = Hash.salt(); MA.setVar("PinSalt", salt) end
   MA.setVar("PinHash", Hash.pin(pin, salt))
+  MA.setVar("PinLen", #pin)
 end
 
 function Config.setAdminPin(pin)
-  if pin == nil then MA.setVar("AdminHash", nil) return end
+  if pin == nil then MA.setVar("AdminHash", nil); MA.setVar("AdminLen", nil) return end
   local salt = MA.getVar("PinSalt")
   if salt == nil or salt == "" then salt = Hash.salt(); MA.setVar("PinSalt", salt) end
   MA.setVar("AdminHash", Hash.pin("admin:" .. pin, salt))
+  MA.setVar("AdminLen", #pin)
 end
 
 -- "user", "admin" or nil
@@ -589,8 +604,7 @@ local function infoText(s)
 end
 
 local function entryText()
-  if #L.entry == 0 then return "Enter PIN" end
-  return string.rep("* ", #L.entry):sub(1, -2)
+  return string.rep("*", #L.entry)
 end
 
 local function statusText()
@@ -725,11 +739,21 @@ local function buildScreen(s)
     styleLabel(title, "Medium20")
     clickable(title, "DeskLockWake")
 
-    local entry = pad:Append("Button")
+    -- A real input field, so the PIN can also be typed on a keyboard (onPC)
+    -- or the desk keys. What is typed is shown as * straight away.
+    local entry = pad:Append("LineEdit")
     MA.set(entry, "Name", "DLEntry_" .. s.index)
     MA.set(entry, "Anchors", { left = 0, right = 2, top = 1, bottom = 1 })
-    styleLabel(entry, "Medium20")
-    clickable(entry, "DeskLockWake")
+    MA.set(entry, "Prompt", "PIN: ")
+    MA.set(entry, "Content", "")
+    MA.set(entry, "Filter", "0123456789*")
+    MA.set(entry, "VkPluginName", "TextInputNumOnly")
+    MA.set(entry, "MaxTextLength", 8)
+    MA.set(entry, "Font", "Medium20")
+    MA.set(entry, "Focus", "InitialFocus")
+    MA.set(entry, "HideFocusFrame", "Yes")
+    MA.set(entry, "PluginComponent", myHandle)
+    MA.set(entry, "TextChanged", "DeskLockTyped")
     ui.entry = entry
 
     for i, key in ipairs(KEYS) do
@@ -777,8 +801,15 @@ function Lock.refreshScreen(s, force)
   if force then for k in pairs(ui) do if type(k) == "string" and k:find("%.") then ui[k] = nil end end end
   setIfChanged(ui, "info", ui.info, "Text", infoText(s))
   if ui.pad then
-    setIfChanged(ui, "pad", ui.pad, "Visible", padVisibleOn(s.index) and "Yes" or "No")
-    setIfChanged(ui, "entry", ui.entry, "Text", entryText())
+    local vis = padVisibleOn(s.index) and "Yes" or "No"
+    if ui["pad.Visible"] ~= vis and vis == "Yes" then
+      -- Put the keyboard focus on the PIN field when the pad comes up.
+      pcall(FindBestFocus, ui.entry)
+    end
+    setIfChanged(ui, "pad", ui.pad, "Visible", vis)
+    L.syncing = true
+    setIfChanged(ui, "entry", ui.entry, "Content", entryText())
+    L.syncing = false
     setIfChanged(ui, "status", ui.status, "Text", statusText())
   end
 end
@@ -788,12 +819,7 @@ end
 -- overlay's children, and a lookup that misses rebuilds the screen every
 -- second (the lock screen flashes).
 local function overlayAlive(s)
-  local base = s.ui and s.ui.base
-  if base == nil then return false end
-  local ok, valid = pcall(IsObjectValid, base)
-  if ok and type(valid) == "boolean" then return valid end
-  local okW, w = pcall(function() return base.W end)
-  return okW and w ~= nil
+  return MA.valid(s.ui and s.ui.base)
 end
 
 local function removeScreen(s)
@@ -1038,12 +1064,47 @@ function Lock.key(key, index)
     if now() < L.cooldownUntil then return end
     if #L.entry < 8 then L.entry = L.entry .. key end
     L.status = ""
+    Lock.autoSubmit()
   end
+end
+
+-- PIN typed in the field (keyboard / desk keys). Everything already there is
+-- shown as *, so the new digits are what follows the stars.
+function Lock.typed(content, index)
+  if not L or L.syncing then return end
+  Lock.wake(index)
+  if L.release then return end
+  content = tostring(content or "")
+  local stars = content:match("^%**")
+  local digits = content:sub(#stars + 1):gsub("%D", "")
+  local entry = (L.entry:sub(1, math.min(#stars, #L.entry)) .. digits):sub(1, 8)
+  if now() < L.cooldownUntil then entry = "" end
+  L.entry = entry
+  if #digits > 0 then L.status = "" end
+  -- Mask what was typed right away, on every screen.
+  for _, s in ipairs(L.screens) do
+    if s.ui and s.ui.entry then s.ui["entry.Content"] = nil end
+  end
+  Lock.autoSubmit()
+  for _, s in ipairs(L.screens) do Lock.refreshScreen(s) end
+end
+
+-- Checks the PIN as soon as it has the right number of digits, so no OK is
+-- needed. A full-length wrong PIN counts as a wrong attempt.
+function Lock.autoSubmit()
+  local n = #L.entry
+  local pinLen, adminLen = L.cfg.pinLen, L.cfg.adminLen
+  if n == 0 or (not pinLen and not adminLen) then return end
+  if n == pinLen or n == adminLen then
+    if Config.checkPin(L.cfg, L.entry) then return Lock.submit() end
+  end
+  if n >= math.max(pinLen or 0, adminLen or 0) then Lock.submit() end
 end
 
 function Lock.submit()
   local t = now()
   if t < L.cooldownUntil then L.entry = "" return end
+  if L.entry == "" then return end -- OK on an empty field is not an attempt
   local who = Config.checkPin(L.cfg, L.entry)
   if L.only and not L.cfg.pinHash and #L.entry > 0 then who = "user" end -- preview without PIN
   L.entry = ""
@@ -1102,7 +1163,22 @@ end
 signalTable.DeskLockKey = function(caller)
   local name = MA.name(caller) or ""
   local key = name:match("^DLKey_(%w+)_%d+$")
-  if key then Lock.key(key, displayOf(caller)) end
+  if not key then
+    -- Fall back to the button's text (1-9, 0, C, OK).
+    local text = U.trim(MA.get(caller, "Text"))
+    if text:match("^%d$") or text == "C" or text == "OK" then key = text end
+  end
+  if key then
+    MA.debug("key %s on display %s", key, tostring(displayOf(caller)))
+    Lock.key(key, displayOf(caller) or (L and L.padScreen))
+  else
+    MA.err("key press not understood (name '%s')", name)
+  end
+  afterClick()
+end
+
+signalTable.DeskLockTyped = function(caller)
+  Lock.typed(MA.get(caller, "Content"), displayOf(caller) or (L and L.padScreen))
   afterClick()
 end
 
@@ -1552,19 +1628,20 @@ local function historyDialog()
 end
 
 local HELP_TEXT = [[
-1. Screen sizes: shows the exact pixel size of every screen. Export templates
-   writes an SVG per screen at that size (PIN pad area marked) + screens.csv.
+1. Templates: pick this desk or full-size / light / compact XT to see the exact
+   pixel size of every screen. Export writes an SVG per screen at that size
+   (PIN pad area marked) plus a size list.
 2. Make one picture per screen at exactly that size, import it to the Images
    pool and put it in an appearance.
-3. Pictures per screen: give every display its appearance. Save + preview
-   shows it for a few seconds.
-4. PIN & security: set a PIN (4-8 digits), optional master PIN, hard lock,
+3. Screens: type each display's appearance (number or name). Preview shows it.
+4. Security: set a PIN (4 to 8 digits), an optional master PIN, hard lock and
    auto-lock on show load.
-5. Lock desk now. Tap any screen, enter the PIN, OK.
+5. Lock: LOCK DESK. To unlock, tap a screen and type the PIN on the pad or the
+   keyboard. It unlocks as soon as the last digit is in.
 
 One-press lock: put  Plugin "DeskLock" "lock"  in a macro.
-Hard lock logs in as user "DeskLock" (no rights) and back in as you on
-unlock; if your user has a password you'll be asked for it.
+Classic menu instead of this window:  Plugin "DeskLock" "menu"
+Hard lock logs in as user "DeskLock" (no rights) and back in as you on unlock.
 A desk that was locked stays locked after a reboot or show reload.
 Try Test lock first: it unlocks itself after 30 s.]]
 
@@ -1614,6 +1691,613 @@ local function menu()
   end
 end
 
+--------------------------------------------------------------------------------
+-- Settings window
+-- One window with tabs: Lock, Screens, Security, Templates, Help. Changes are
+-- saved as you make them. Buttons only queue a job; the jobs run in the
+-- plugin's own loop, where dialogs and the lock itself can wait.
+--------------------------------------------------------------------------------
+local Gui = { tabs = {} }
+local G -- the open window, nil when closed
+
+local GUI_TABS = {
+  { key = "lock",      label = "Lock" },
+  { key = "screens",   label = "Screens" },
+  { key = "security",  label = "Security" },
+  { key = "templates", label = "Templates" },
+  { key = "help",      label = "Help" },
+}
+
+local SCREENS_PER_PAGE = 7
+
+function Gui.queue(fn)
+  if G then G.jobs[#G.jobs + 1] = fn end
+end
+
+function Gui.status(text)
+  if not G then return end
+  G.statusText = text or ""
+  if G.statusObj then MA.set(G.statusObj, "Text", G.statusText) end
+end
+
+-- Places a new widget. at = { x1, y1, x2, y2 } in grid cells.
+local function widget(parent, class, key, at, fixed)
+  local ok, o = pcall(function() return parent:Append(class) end)
+  if not ok or not o then return nil, {} end
+  MA.set(o, "Name", "DLGui_" .. key)
+  MA.set(o, "Anchors", { left = at[1], top = at[2], right = at[3] or at[1], bottom = at[4] or at[2] })
+  MA.set(o, "Margin", { left = 3, right = 3, top = 2, bottom = 2 })
+  local w = { obj = o }
+  if fixed then G.fixed[key] = w else G.widgets[key] = w end
+  return o, w
+end
+
+function Gui.label(key, at, text, opts)
+  opts = opts or {}
+  local o = widget(opts.parent or G.content, "Button", key, at, opts.fixed)
+  MA.set(o, "Text", text)
+  styleLabel(o, opts.font)
+  if opts.left then MA.set(o, "TextalignmentH", "Left") end
+  return o
+end
+
+function Gui.button(key, at, text, action, opts)
+  opts = opts or {}
+  local o, w = widget(opts.parent or G.content, "Button", key, at, opts.fixed)
+  MA.set(o, "Text", text)
+  if opts.font then MA.set(o, "Font", opts.font) end
+  if opts.please then
+    local c = MA.color("Button", "BackgroundPlease")
+    if c then MA.set(o, "BackColor", c) end
+  end
+  clickable(o, "DeskLockGuiClick")
+  w.action = action
+  return o
+end
+
+function Gui.check(key, at, text, state, onToggle)
+  local o, w = widget(G.content, "CheckBox", key, at)
+  MA.set(o, "Text", text)
+  MA.set(o, "State", state and 1 or 0)
+  clickable(o, "DeskLockGuiClick")
+  w.toggle, w.state = onToggle, state and true or false
+  return o
+end
+
+function Gui.edit(key, at, content, onChange, opts)
+  opts = opts or {}
+  local o, w = widget(G.content, "LineEdit", key, at)
+  if opts.prompt then MA.set(o, "Prompt", opts.prompt) end
+  MA.set(o, "Content", tostring(content == nil and "" or content))
+  if opts.numeric then
+    MA.set(o, "Filter", "0123456789")
+    MA.set(o, "VkPluginName", "TextInputNumOnly")
+  else
+    MA.set(o, "VkPluginName", "TextInput")
+  end
+  if opts.maxLen then MA.set(o, "MaxTextLength", opts.maxLen) end
+  MA.set(o, "TextAutoAdjust", "Yes")
+  MA.set(o, "HideFocusFrame", "Yes")
+  MA.set(o, "PluginComponent", myHandle)
+  MA.set(o, "TextChanged", "DeskLockGuiText")
+  w.change = onChange
+  return o
+end
+
+-- n content rows of the same height.
+function Gui.rows(n, height)
+  MA.set(G.content, "Rows", n)
+  pcall(function()
+    for i = 1, n do
+      G.content[1][i].SizePolicy = "Fixed"
+      G.content[1][i].Size = tostring(height)
+    end
+  end)
+end
+
+-- Builds the window on the given display (or the one in focus).
+function Gui.build()
+  local display = G.display or focusDisplay()
+  if not display then
+    local list = MA.displays()
+    display = list[1] and list[1].handle
+  end
+  local overlay = MA.get(display, "ScreenOverlay")
+  if not overlay then return false end
+  local dw, dh = MA.displaySize(display)
+  if not dw or not dh then return false end
+  local w, h = math.min(1100, dw - 40), math.min(800, dh - 40)
+
+  local ok, base = pcall(function() return overlay:Append("BaseInput") end)
+  if not ok or not base then return false end
+  G.overlay, G.base, G.fixed, G.widgets = overlay, base, {}, {}
+  MA.set(base, "Name", "DeskLockWindow")
+  MA.set(base, "W", w)
+  MA.set(base, "H", h)
+  MA.set(base, "MinSize", w .. "," .. h)
+  MA.set(base, "MaxSize", w .. "," .. h)
+  MA.set(base, "Columns", 1)
+  MA.set(base, "Rows", 4)
+  pcall(function()
+    base[1][1].SizePolicy = "Fixed"; base[1][1].Size = "60"
+    base[1][2].SizePolicy = "Fixed"; base[1][2].Size = "60"
+    base[1][3].SizePolicy = "Stretch"
+    base[1][4].SizePolicy = "Fixed"; base[1][4].Size = "50"
+  end)
+  MA.set(base, "AutoClose", "No")
+  MA.set(base, "CloseOnEscape", "Yes")
+
+  -- Title bar with our own close button, so we know when the window goes.
+  local titleBar = base:Append("TitleBar")
+  MA.set(titleBar, "Columns", 2)
+  MA.set(titleBar, "Rows", 1)
+  MA.set(titleBar, "Anchors", { left = 0, right = 0, top = 0, bottom = 0 })
+  MA.set(titleBar, "Texture", "corner2")
+  pcall(function() titleBar[2][2].SizePolicy = "Fixed"; titleBar[2][2].Size = "60" end)
+  local title = titleBar:Append("TitleButton")
+  MA.set(title, "Text", TITLE .. " " .. VERSION)
+  MA.set(title, "Anchors", { left = 0, right = 0, top = 0, bottom = 0 })
+  MA.set(title, "Texture", "corner1")
+  Gui.button("close", { 1, 0 }, "X", function() G.exit = true end, { parent = titleBar, fixed = true })
+
+  -- Tabs
+  local tabs = base:Append("UILayoutGrid")
+  MA.set(tabs, "Anchors", { left = 0, right = 0, top = 1, bottom = 1 })
+  MA.set(tabs, "Columns", #GUI_TABS)
+  MA.set(tabs, "Rows", 1)
+  for i, t in ipairs(GUI_TABS) do
+    G.tabObjs[t.key] = Gui.button("tab_" .. t.key, { i - 1, 0 }, t.label,
+      function() Gui.render(t.key) end, { parent = tabs, fixed = true, font = "Medium20" })
+  end
+
+  -- Content
+  G.content = base:Append("UILayoutGrid")
+  MA.set(G.content, "Anchors", { left = 0, right = 0, top = 2, bottom = 2 })
+  MA.set(G.content, "Columns", 12)
+
+  -- Footer: status line
+  local footer = base:Append("UILayoutGrid")
+  MA.set(footer, "Anchors", { left = 0, right = 0, top = 3, bottom = 3 })
+  MA.set(footer, "Columns", 1)
+  MA.set(footer, "Rows", 1)
+  G.statusObj = Gui.label("status", { 0, 0 }, G.statusText or "", { parent = footer, fixed = true, left = true })
+
+  G.hidden = false
+  Gui.render(G.tab)
+  return true
+end
+
+-- Removes the window (to lock, preview, or close).
+function Gui.hide()
+  if G and G.overlay then pcall(function() G.overlay:ClearUIChildren() end) end
+  if G then G.base, G.content, G.statusObj, G.hidden = nil, nil, nil, true end
+end
+
+function Gui.isOpen()
+  if not G or G.exit then return false end
+  if G.hidden then return true end
+  if not MA.valid(G.base) then return false end
+  -- Without IsObjectValid a closed window can't be seen: give up after 30 min idle.
+  if type(IsObjectValid) ~= "function" and now() - G.lastUse > 1800 then return false end
+  return true
+end
+
+function Gui.render(tab)
+  G.tab = tab or G.tab or "lock"
+  G.widgets = {}
+  if not pcall(function() G.content:ClearUIChildren() end) and not G.rebuilding then
+    -- Can't empty the tab: build the whole window again instead.
+    G.rebuilding = true
+    Gui.hide()
+    Gui.build()
+    G.rebuilding = false
+    return
+  end
+  local please = MA.color("Button", "BackgroundPlease")
+  local normal = MA.color("Button", "Background")
+  for key, o in pairs(G.tabObjs) do
+    local c = (key == G.tab) and please or normal
+    if c then MA.set(o, "BackColor", c) end
+  end
+  Gui.tabs[G.tab]()
+end
+
+-- Runs a job with the window out of the way, then brings it back.
+local function withoutWindow(fn)
+  return function()
+    Gui.hide()
+    fn()
+    if G and not G.exit then Gui.build() end
+  end
+end
+
+local function needPin()
+  local cfg = Config.load()
+  if cfg.mode == "pin" and not cfg.pinHash then
+    Gui.render("security")
+    Gui.status("Set a PIN before locking (or switch on showcase mode).")
+    return true
+  end
+  return false
+end
+
+-- Lock tab ------------------------------------------------------------------
+
+Gui.tabs.lock = function()
+  local cfg = Config.load()
+  local displays = MA.displays()
+  local shown = math.min(#displays, 5)
+  local more = #displays > shown and 1 or 0
+  Gui.rows(7 + shown + more, 44)
+
+  local ready = cfg.mode == "tap" or cfg.pinHash ~= nil
+  Gui.label("headline", { 0, 0, 11 }, ready and "Ready to lock" or "Set a PIN on the Security tab before locking",
+    { font = "Medium20" })
+  local bits = {
+    cfg.mode == "tap" and "showcase mode (no PIN)" or (cfg.pinHash and "PIN set" or "no PIN yet"),
+    cfg.hardLock and "hard lock on" or "hard lock off (keys still work)",
+    cfg.autoLock and "auto-lock on show load" or "no auto-lock",
+    string.format("%d screen%s", #displays, #displays == 1 and "" or "s"),
+  }
+  Gui.label("summary", { 0, 1, 11 }, table.concat(bits, "   |   "))
+
+  Gui.button("lock", { 0, 2, 7, 3 }, "LOCK DESK", function()
+    if needPin() then return end
+    Gui.hide()
+    G.exit = true
+    lockNow(false)
+  end, { please = true, font = "Medium20" })
+  Gui.button("test", { 8, 2, 11, 3 }, string.format("Test lock (%d s)", SETTINGS.testSeconds), function()
+    if needPin() then return end
+    withoutWindow(function() lockNow(true) end)()
+    Gui.status("Test lock finished.")
+  end)
+
+  Gui.label("screensHead", { 0, 4, 11 }, "Screens", { left = true, font = "Medium20" })
+  for i = 1, shown do
+    local d = displays[i]
+    local sc = Config.screen(d.index)
+    local pic = "no picture (black)"
+    if sc.app ~= "" then
+      local app, label = MA.appearance(sc.app)
+      pic = app and ("appearance " .. label) or ("appearance " .. sc.app .. " NOT FOUND")
+    end
+    Gui.label("scr" .. d.index, { 0, 4 + i, 11 },
+      string.format("Display %d  -  %s  -  %d x %d px  -  %s", d.index, d.name, d.w, d.h, pic), { left = true })
+  end
+  local row = 5 + shown
+  if more == 1 then
+    Gui.label("more", { 0, row, 11 }, string.format("+ %d more on the Screens tab", #displays - shown), { left = true })
+    row = row + 1
+  end
+  local count = tonumber(MA.getVar("FailCount")) or 0
+  local last = MA.getVar("LastFail")
+  Gui.label("history", { 0, row, 8 }, string.format("Wrong PINs since reset: %d%s", count,
+    (last and last ~= "") and ("   (last: " .. last .. ")") or ""), { left = true })
+  Gui.button("resetHistory", { 9, row, 11 }, "Reset", function()
+    MA.setVar("FailCount", 0)
+    MA.setVar("LastFail", nil)
+    Gui.render()
+    Gui.status("Unlock history reset.")
+  end)
+  Gui.label("hint", { 0, row + 1, 11 }, 'One-press lock: put  Plugin "DeskLock" "lock"  in a macro.', { left = true })
+end
+
+-- Screens tab ---------------------------------------------------------------
+
+local function appearanceStatus(index, ref)
+  ref = U.trim(ref)
+  if ref == "" then return string.format("Display %d: no picture (black screen).", index) end
+  local app, label = MA.appearance(ref)
+  if app then return string.format("Display %d: appearance %s.", index, label) end
+  return string.format("Display %d: appearance '%s' not found.", index, ref)
+end
+
+Gui.tabs.screens = function()
+  local displays = MA.displays()
+  local pages = math.max(1, math.ceil(#displays / SCREENS_PER_PAGE))
+  G.page = math.min(G.page or 1, pages)
+  local first = (G.page - 1) * SCREENS_PER_PAGE + 1
+  local last = math.min(#displays, first + SCREENS_PER_PAGE - 1)
+  local n = math.max(0, last - first + 1)
+  Gui.rows(n + 3, 52)
+
+  Gui.label("h_disp", { 0, 0, 1 }, "Display")
+  Gui.label("h_size", { 2, 0, 3 }, "Size (px)")
+  Gui.label("h_app", { 4, 0, 5 }, "Appearance")
+  Gui.label("h_msg", { 6, 0, 7 }, "Message text")
+  Gui.label("h_clock", { 8, 0 }, "Clock")
+  Gui.label("h_show", { 9, 0 }, "Text")
+  Gui.label("h_pad", { 10, 0 }, "PIN pad")
+
+  for i = first, last do
+    local d = displays[i]
+    local r = i - first + 1
+    local sc = Config.screen(d.index)
+    local idx = d.index
+    Gui.label("d" .. idx, { 0, r, 1 }, string.format("%d  %s", idx, d.name), { left = true })
+    Gui.label("s" .. idx, { 2, r, 3 }, string.format("%d x %d", d.w, d.h))
+    Gui.edit("app" .. idx, { 4, r, 5 }, sc.app, function(v)
+      Config.saveScreen(idx, { app = U.trim(v) })
+      Gui.status(appearanceStatus(idx, v))
+    end, { maxLen = 64 })
+    Gui.edit("msg" .. idx, { 6, r, 7 }, sc.msg, function(v)
+      Config.saveScreen(idx, { msg = v })
+      Gui.status(string.format("Display %d: message saved.", idx))
+    end, { maxLen = 120 })
+    Gui.check("clock" .. idx, { 8, r }, "", sc.clock, function(v)
+      Config.saveScreen(idx, { clock = v })
+      Gui.status(string.format("Display %d: clock %s.", idx, v and "on" or "off"))
+    end)
+    Gui.check("show" .. idx, { 9, r }, "", sc.showMsg, function(v)
+      Config.saveScreen(idx, { showMsg = v })
+      Gui.status(string.format("Display %d: message %s.", idx, v and "shown" or "hidden"))
+    end)
+    if Geo.padFits(d.w, d.h) then
+      Gui.check("pad" .. idx, { 10, r }, "", sc.pad, function(v)
+        Config.saveScreen(idx, { pad = v })
+        Gui.status(string.format("Display %d: PIN pad %s.", idx, v and "allowed" or "not allowed"))
+      end)
+    else
+      Gui.label("pad" .. idx, { 10, r }, "too small")
+    end
+    Gui.button("preview" .. idx, { 11, r }, "Preview", withoutWindow(function()
+      previewScreen(idx)
+      Gui.status(string.format("Preview of display %d finished.", idx))
+    end))
+  end
+
+  local r = n + 1
+  Gui.edit("allApp", { 0, r, 3 }, G.allApp or "", function(v) G.allApp = U.trim(v) end,
+    { prompt = "Appearance: ", maxLen = 64 })
+  local function assign(consecutive)
+    return function()
+      local ref = U.trim(G.allApp or "")
+      if ref == "" then return Gui.status("Type an appearance first.") end
+      local start = tonumber(ref)
+      if consecutive and not start then return Gui.status("Consecutive needs an appearance number.") end
+      for i, d in ipairs(displays) do
+        Config.saveScreen(d.index, { app = consecutive and tostring(start + i - 1) or ref })
+      end
+      Gui.render()
+      Gui.status(consecutive and string.format("Appearances %d to %d on displays %s to %s.",
+        start, start + #displays - 1, displays[1].index, displays[#displays].index)
+        or ("Appearance " .. ref .. " on every screen."))
+    end
+  end
+  Gui.button("allSame", { 4, r, 6 }, "Same on all screens", assign(false))
+  Gui.button("allConsecutive", { 7, r, 9 }, "Consecutive from it", assign(true))
+  if pages > 1 then
+    Gui.button("pagePrev", { 10, r }, "<", function() G.page = math.max(1, G.page - 1); Gui.render() end)
+    Gui.button("pageNext", { 11, r }, ">", function() G.page = math.min(pages, G.page + 1); Gui.render() end)
+  end
+  Gui.label("screensHint", { 0, r + 1, 11 },
+    "Pictures must be exactly the screen size. Clock / Text show on an info line at the bottom.", { left = true })
+end
+
+-- Security tab --------------------------------------------------------------
+
+Gui.tabs.security = function()
+  local cfg = Config.load()
+  if cfg.pinHash and not G.secOK then
+    Gui.rows(3, 52)
+    Gui.label("secLocked", { 0, 0, 11 }, "Security settings are protected by your PIN.", { font = "Medium20" })
+    Gui.button("secUnlock", { 3, 1, 8 }, "Enter current PIN", function()
+      local ok, pin = pcall(TextInput, "Current PIN", "")
+      if not ok or pin == nil then return end
+      if Config.checkPin(Config.load(), U.trim(pin)) then
+        G.secOK = true
+        Gui.render()
+        Gui.status("Security settings unlocked.")
+      else
+        Gui.status("Wrong PIN.")
+      end
+    end, { please = true })
+    return
+  end
+
+  Gui.rows(9, 52)
+  G.newPin, G.repeatPin, G.masterPin = "", "", ""
+  local function save(mutate, text)
+    return function(v)
+      local c = Config.load()
+      mutate(c, v)
+      Config.save(c)
+      Gui.status(text and text(c) or "Saved.")
+    end
+  end
+
+  Gui.label("l_pin", { 0, 0, 2 }, cfg.pinHash and "Change PIN" or "Set PIN", { left = true })
+  Gui.edit("newPin", { 3, 0, 5 }, "", function(v) G.newPin = U.trim(v) end,
+    { numeric = true, maxLen = 8, prompt = "New: " })
+  Gui.edit("repeatPin", { 6, 0, 8 }, "", function(v) G.repeatPin = U.trim(v) end,
+    { numeric = true, maxLen = 8, prompt = "Repeat: " })
+  Gui.button("setPin", { 9, 0, 11 }, "Save PIN", function()
+    if not Config.validPin(G.newPin) then return Gui.status("The PIN must be 4 to 8 digits.") end
+    if G.newPin ~= G.repeatPin then return Gui.status("The two PINs are not the same.") end
+    local c = Config.load()
+    if c.adminHash and Config.checkPin(c, G.newPin) == "admin" then
+      return Gui.status("The PIN must differ from the master PIN.")
+    end
+    Config.setPin(G.newPin)
+    G.secOK = true
+    Gui.render()
+    Gui.status("PIN saved.")
+  end, { please = true })
+
+  Gui.label("l_master", { 0, 1, 2 }, "Master PIN", { left = true })
+  Gui.edit("masterPin", { 3, 1, 5 }, "", function(v) G.masterPin = U.trim(v) end,
+    { numeric = true, maxLen = 8, prompt = "Master: " })
+  Gui.button("setMaster", { 6, 1, 8 }, "Save master PIN", function()
+    if not Config.validPin(G.masterPin) then return Gui.status("The master PIN must be 4 to 8 digits.") end
+    if Config.checkPin(Config.load(), G.masterPin) == "user" then
+      return Gui.status("The master PIN must differ from the PIN.")
+    end
+    Config.setAdminPin(G.masterPin)
+    Gui.render()
+    Gui.status("Master PIN saved.")
+  end)
+  Gui.button("removeMaster", { 9, 1, 11 }, "Remove master PIN", function()
+    Config.setAdminPin(nil)
+    Gui.render()
+    Gui.status("Master PIN removed.")
+  end)
+
+  Gui.label("l_tries", { 0, 2, 3 }, "Wrong PINs before cooldown", { left = true })
+  Gui.edit("maxTries", { 4, 2, 5 }, cfg.maxTries, save(function(c, v) c.maxTries = U.clamp(v, 1, 99) end,
+    function(c) return string.format("Cooldown after %d wrong PINs.", c.maxTries) end), { numeric = true, maxLen = 2 })
+  Gui.label("l_cool", { 6, 2, 9 }, "Cooldown seconds (doubles)", { left = true })
+  Gui.edit("cooldown", { 10, 2, 11 }, cfg.cooldown, save(function(c, v) c.cooldown = U.clamp(v, 0, SETTINGS.maxCooldown) end,
+    function(c) return string.format("First cooldown %d s.", c.cooldown) end), { numeric = true, maxLen = 3 })
+
+  Gui.label("l_hide", { 0, 3, 3 }, "PIN pad hides after (s)", { left = true })
+  Gui.edit("padTimeout", { 4, 3, 5 }, cfg.padTimeout, save(function(c, v) c.padTimeout = U.clamp(v, 5, 600) end,
+    function(c) return string.format("PIN pad hides after %d s.", c.padTimeout) end), { numeric = true, maxLen = 3 })
+  Gui.label("l_padscr", { 6, 3, 9 }, "PIN pad screen (0 = tapped)", { left = true })
+  Gui.edit("padScreen", { 10, 3, 11 }, cfg.padScreen, save(function(c, v) c.padScreen = U.clamp(v, 0, 99) end,
+    function(c) return c.padScreen == 0 and "PIN pad on the screen you tap." or
+      string.format("PIN pad always on display %d.", c.padScreen) end), { numeric = true, maxLen = 2 })
+
+  Gui.check("hardLock", { 0, 4, 5 }, "Hard lock (keys, faders, encoders do nothing)", cfg.hardLock,
+    save(function(c, v) c.hardLock = v end, function(c) return c.hardLock and "Hard lock on." or "Hard lock off: only the screens are covered." end))
+  Gui.check("autoLock", { 6, 4, 11 }, "Auto-lock when the show loads", cfg.autoLock,
+    save(function(c, v) c.autoLock = v end, function(c) return c.autoLock and "The desk locks every time this show loads." or "Auto-lock off." end))
+  Gui.check("showFails", { 0, 5, 5 }, "Show failed attempts on the lock screen", cfg.showFails,
+    save(function(c, v) c.showFails = v end))
+  Gui.check("tapToShow", { 6, 5, 11 }, "Tap a screen to show the PIN pad", cfg.tapToShow,
+    save(function(c, v) c.tapToShow = v end, function(c) return c.tapToShow and "PIN pad shows when a screen is tapped." or "PIN pad always visible." end))
+  Gui.check("tapMode", { 0, 6, 5 }, "Showcase mode: no PIN, a tap unlocks", cfg.mode == "tap",
+    save(function(c, v) c.mode = v and "tap" or "pin" end, function(c) return c.mode == "tap" and "Showcase mode: anyone can unlock with a tap." or "PIN needed to unlock." end))
+
+  Gui.label("pinState", { 0, 7, 11 }, string.format("PIN: %s     Master PIN: %s",
+    cfg.pinHash and "set" or "not set", cfg.adminHash and "set" or "not set"), { left = true })
+  Gui.label("secHint", { 0, 8, 11 }, "PINs are 4 to 8 digits and are stored only as a hash in the show.", { left = true })
+end
+
+-- Templates tab -------------------------------------------------------------
+
+Gui.tabs.templates = function()
+  G.tplSource = G.tplSource or "desk"
+  local console = Templates.console(G.tplSource)
+  local rows = Templates.rows(console)
+  local shown = math.min(#rows, 10)
+  Gui.rows(shown + 4, 44)
+
+  Gui.label("srcLabel", { 0, 0, 2 }, "Sizes for", { left = true })
+  local sources = { { key = "desk", label = "This desk" } }
+  for _, c in ipairs(CONSOLES) do sources[#sources + 1] = { key = c.key, label = c.label:gsub("^grandMA3 ", "") } end
+  for i, src in ipairs(sources) do
+    local x = 3 + (i - 1) * 2
+    Gui.button("src_" .. src.key, { x, 0, x + 1 }, src.label, function()
+      G.tplSource = src.key
+      Gui.render()
+      Gui.status("Showing sizes for " .. (src.key == "desk" and "this desk / onPC" or src.label) .. ".")
+    end, { please = src.key == G.tplSource })
+  end
+
+  Gui.label("t_disp", { 0, 1, 1 }, "Display")
+  Gui.label("t_name", { 2, 1, 4 }, "Name")
+  Gui.label("t_size", { 5, 1, 7 }, "Size (px)")
+  Gui.label("t_aspect", { 8, 1, 9 }, "Aspect")
+  Gui.label("t_pad", { 10, 1, 11 }, "PIN pad")
+  for i = 1, shown do
+    local r = rows[i]
+    Gui.label("t" .. i .. "_d", { 0, 1 + i, 1 }, tostring(r.index))
+    Gui.label("t" .. i .. "_n", { 2, 1 + i, 4 }, r.name, { left = true })
+    Gui.label("t" .. i .. "_s", { 5, 1 + i, 7 }, string.format("%d x %d", r.w, r.h), { font = "Medium20" })
+    Gui.label("t" .. i .. "_a", { 8, 1 + i, 9 }, r.aspect)
+    Gui.label("t" .. i .. "_p", { 10, 1 + i, 11 }, r.pad and "yes" or "-")
+  end
+  local r = shown + 2
+  if #rows > shown then
+    Gui.label("tMore", { 0, r, 11 }, string.format("+ %d more in the export", #rows - shown), { left = true })
+  else
+    Gui.label("tNote", { 0, r, 11 }, console and ("Native sizes of the " .. console.label .. ". External monitors: 1920 x 1080.")
+      or "Measured on this desk / onPC now.", { left = true })
+  end
+  Gui.button("export", { 0, r + 1, 5 }, "Export SVG templates + size list", function()
+    exportDialog(console or "desk")
+  end, { please = true })
+  Gui.label("padSize", { 6, r + 1, 11 }, string.format("PIN pad: %d x %d px, centred", SETTINGS.padWidth, SETTINGS.padHeight))
+end
+
+-- Help tab ------------------------------------------------------------------
+
+Gui.tabs.help = function()
+  local lines = {}
+  for line in (HELP_TEXT .. "\n"):gmatch("(.-)\n") do lines[#lines + 1] = line end
+  Gui.rows(#lines, 30)
+  for i, line in ipairs(lines) do Gui.label("help" .. i, { 0, i - 1, 11 }, line, { left = true }) end
+end
+
+-- Handlers --------------------------------------------------------------------
+
+local function guiWidget(caller)
+  if not G then return nil end
+  local key = (MA.name(caller) or ""):match("^DLGui_(.+)$")
+  if not key then return nil end
+  return G.widgets[key] or G.fixed[key]
+end
+
+-- Runs one queued job. Brings the window back if the job hid it and failed.
+local function runJob(job)
+  local ok, err = pcall(job)
+  if not ok then MA.err("%s", tostring(err)) end
+  if G and G.hidden and not G.exit then Gui.build() end
+  if not ok then Gui.status("Error: " .. tostring(err)) end
+end
+
+-- Runs queued jobs straight away when there is no loop to run them.
+function Gui.pump()
+  while G and #G.jobs > 0 do runJob(table.remove(G.jobs, 1)) end
+  if G and G.exit then Gui.hide(); G = nil end
+end
+
+signalTable.DeskLockGuiClick = function(caller)
+  local w = guiWidget(caller)
+  if not w then return end
+  G.lastUse = now()
+  if w.toggle then
+    w.state = not w.state
+    MA.set(caller, "State", w.state and 1 or 0)
+    local fn, v = w.toggle, w.state
+    Gui.queue(function() fn(v) end)
+  elseif w.action then
+    Gui.queue(w.action)
+  end
+  if G.noLoop then Gui.pump() end
+end
+
+signalTable.DeskLockGuiText = function(caller)
+  local w = guiWidget(caller)
+  if not w or not w.change then return end
+  G.lastUse = now()
+  w.change(tostring(MA.get(caller, "Content") or ""))
+end
+
+-- Opens the window and keeps it running until it is closed. false when the
+-- window can't be built (the classic menu is used then).
+function Gui.run(tab, display)
+  G = { jobs = {}, tab = tab or "lock", display = display, tabObjs = {}, lastUse = now(),
+        statusText = "Changes are saved as you make them." }
+  local me = G
+  if not Gui.build() then G = nil return false end
+  while G == me and Gui.isOpen() do
+    local job = table.remove(G.jobs, 1)
+    if job then
+      runJob(job)
+    elseif not MA.sleep(0.1) then
+      G.noLoop = true -- no coroutine: the handlers run the jobs
+      return true
+    end
+  end
+  if G == me then
+    if not G.hidden then Gui.hide() end
+    G = nil
+  end
+  return true
+end
+
 -- Should the desk lock straight away (auto-lock, or locked before a reboot)?
 local function pendingLock()
   local cfg = Config.load()
@@ -1637,7 +2321,11 @@ local function Main(displayHandle, argument)
     if action == "export" then exportDialog(console) end
     return
   end
-  return menu()
+  if arg == "menu" then return menu() end
+  local tab = "lock"
+  for _, t in ipairs(GUI_TABS) do if t.key == arg then tab = arg end end
+  if Gui.run(tab, displayHandle) then return end
+  return menu() -- the window couldn't be built: fall back to the popup menu
 end
 
 --------------------------------------------------------------------------------
@@ -1682,6 +2370,7 @@ if type(DESKLOCK_TEST_HOOK) == "table" then
   H.CONSOLES = CONSOLES
   H.armAutoLock, H.signalTable = armAutoLock, signalTable
   H.state = function() return L end
+  H.Gui, H.gui = Gui, function() return G end
 end
 
 return Main

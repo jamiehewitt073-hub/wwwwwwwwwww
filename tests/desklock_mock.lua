@@ -129,6 +129,41 @@ function M.new()
     S.click(displayIndex, "DLKey_OK_" .. displayIndex)
   end
 
+  -- Settings window helpers ---------------------------------------------------
+  function S.gui()
+    for _, d in ipairs(S.displays) do
+      for _, c in ipairs(d._props.ScreenOverlay._children) do
+        if c._props.Name == "DeskLockWindow" then return c, d end
+      end
+    end
+  end
+  function S.guiObj(key)
+    local g = S.gui()
+    return g and S.find(g, "DLGui_" .. key)
+  end
+  function S.guiClick(key)
+    local o = S.guiObj(key)
+    assert(o, "no window widget " .. key)
+    S.signalTable[o._props.Clicked](o)
+  end
+  function S.guiType(key, text)
+    local o = S.guiObj(key)
+    assert(o, "no window widget " .. key)
+    o._props.Content = text
+    S.signalTable[o._props.TextChanged](o)
+  end
+  -- Types on the keyboard into the PIN field of a lock screen, one key at a time.
+  -- "<" is backspace.
+  function S.typeKeys(displayIndex, text)
+    local o = S.find(S.lockBase(displayIndex), "DLEntry_" .. displayIndex)
+    assert(o, "no PIN field on display " .. displayIndex)
+    for ch in text:gmatch(".") do
+      local c = o._props.Content or ""
+      o._props.Content = ch == "<" and c:sub(1, -2) or (c .. ch)
+      S.signalTable[o._props.TextChanged](o)
+    end
+  end
+
   -- Globals ---------------------------------------------------------------------
   local G = {}
   function G.Printf(fmt, ...) S.log[#S.log + 1] = string.format(fmt, ...) end
