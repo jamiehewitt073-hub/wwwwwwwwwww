@@ -11,7 +11,12 @@ local function newObject(class, props)
   local o = { _class = class, _props = props or {}, _children = {}, _grid = {} }
   return setmetatable(o, {
     __index = function(t, k)
-      if k == "Children" then return function(self) return rawget(self, "_children") end end
+      if k == "Children" then
+        return function(self)
+          if rawget(self, "_hideChildren") then return {} end
+          return rawget(self, "_children")
+        end
+      end
       if k == "Append" then
         return function(self, cls)
           local c = newObject(cls or "Object")
@@ -22,7 +27,13 @@ local function newObject(class, props)
         end
       end
       if k == "Acquire" then return function(self) return t.Append(self, "User") end end
-      if k == "ClearUIChildren" then return function(self) rawset(self, "_children", {}) end end
+      if k == "ClearUIChildren" then
+        return function(self)
+          local function kill(o) rawset(o, "_deleted", true); for _, c in ipairs(rawget(o, "_children")) do kill(c) end end
+          for _, c in ipairs(rawget(self, "_children")) do kill(c) end
+          rawset(self, "_children", {})
+        end
+      end
       if k == "Parent" then return function(self) return rawget(self, "_parent") end end
       if k == "ToAddr" then return function(self) return rawget(self, "_props").addr end end
       if k == "GetClass" then return function(self) return rawget(self, "_class") end end
@@ -43,7 +54,7 @@ M.newObject = newObject
 
 function M.new()
   local S = {
-    t = 1000000, displays = {}, users = {}, current = nil, vars = {},
+    t = 1000000, displays = {}, hideOverlayChildren = true, users = {}, current = nil, vars = {},
     commands = {}, log = {}, errors = {}, timers = {},
     boxes = {}, popups = {}, texts = {}, boxSpecs = {}, textTitles = {},
     appearances = {}, library = nil,
@@ -53,6 +64,8 @@ function M.new()
   function S.addDisplay(index, name, w, h)
     local d = newObject("Display", { Name = name, W = w, H = h, Index = index })
     d._props.ScreenOverlay = newObject("ScreenOverlay")
+    -- Like the console: UI added by a plugin is not listed by Children().
+    rawset(d._props.ScreenOverlay, "_hideChildren", S.hideOverlayChildren)
     S.displays[#S.displays + 1] = d
     return d
   end
@@ -137,6 +150,7 @@ function M.new()
   function G.SetVar(_, k, v) S.vars[k] = v end
   function G.DelVar(_, k) S.vars[k] = nil end
   function G.GetDisplayCollect() return displayCollect end
+  function G.IsObjectValid(o) return type(o) == "table" and not rawget(o, "_deleted") end
   function G.GetDisplayByIndex(i) return S.displays[i] end
   function G.GetFocusDisplay() return S.displays[1] end
   function G.CurrentUser() return S.current end

@@ -310,6 +310,19 @@ test("watchdog covers a screen again when its overlay is removed", function()
   truthy(S.lockBase(5), "new display covered")
 end)
 
+test("no flashing: a locked screen is not rebuilt while it is still up", function()
+  local S, main, H = load()
+  setPin(H, "2468")
+  local step = run(main, S, "lock")
+  local before = {}
+  for i = 1, 4 do before[i] = S.lockBase(i) end
+  for _ = 1, 20 do step(0.6) end
+  for i = 1, 4 do eq(S.lockBase(i), before[i], "display " .. i .. " rebuilt (flash)") end
+  for _, line in ipairs(S.log) do truthy(not line:find("uncovered"), "watchdog fired: " .. line) end
+  S.click(1, "DLBg_1"); S.typePin(1, "2468")
+  truthy(not step(0.2))
+end)
+
 test("test lock unlocks itself and leaves no locked flag", function()
   local S, main, H = load()
   setPin(H, "2468")

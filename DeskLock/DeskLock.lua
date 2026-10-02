@@ -783,14 +783,17 @@ function Lock.refreshScreen(s, force)
   end
 end
 
--- Is our overlay still on this display?
+-- Is our overlay still on this display? Checks the object we created rather
+-- than looking it up by name: the console doesn't list plugin UI under the
+-- overlay's children, and a lookup that misses rebuilds the screen every
+-- second (the lock screen flashes).
 local function overlayAlive(s)
-  local overlay = MA.get(s.handle, "ScreenOverlay")
-  if not overlay then return false end
-  for _, c in ipairs(MA.children(overlay)) do
-    if MA.name(c) == OVERLAY_NAME then return true end
-  end
-  return false
+  local base = s.ui and s.ui.base
+  if base == nil then return false end
+  local ok, valid = pcall(IsObjectValid, base)
+  if ok and type(valid) == "boolean" then return valid end
+  local okW, w = pcall(function() return base.W end)
+  return okW and w ~= nil
 end
 
 local function removeScreen(s)
@@ -836,9 +839,19 @@ function Lock.sync()
     L.screens = list
     L.padOk, L.firstPad = Geo.padScreens(L.screens, L.cfg)
   end
+  local t = now()
   for _, s in ipairs(L.screens) do
-    if not s.built or not overlayAlive(s) then
-      if s.built then MA.log("display %d was uncovered - covering it again", s.index) end
+    if (not s.built or not overlayAlive(s)) and t >= (s.nextBuild or 0) then
+      if s.built then
+        MA.log("display %d was uncovered - covering it again", s.index)
+        -- Something keeps closing it: don't rebuild in a tight loop.
+        s.recent = (s.lastBuild and t - s.lastBuild < 10) and (s.recent or 0) + 1 or 0
+        if s.recent >= 3 then
+          s.nextBuild = t + 30
+          MA.err("display %d keeps closing the lock screen - next try in 30 s", s.index)
+        end
+      end
+      s.lastBuild = t
       buildScreen(s)
     end
   end
@@ -963,9 +976,11 @@ function Lock.tick()
     Lock.sync()
     if L.hard then
       local _, name = MA.currentUser()
-      if name and name:lower() ~= SETTINGS.lockUserName:lower() then
+      if name and name:lower() ~= SETTINGS.lockUserName:lower() and t >= (L.nextLogin or 0) then
         MA.log("user changed to %s while locked - locking again", name)
-        MA.login(SETTINGS.lockUserName)
+        if not MA.login(SETTINGS.lockUserName) then
+          L.nextLogin = t + 10 -- don't hammer the console with logins
+        end
       end
     end
   end
