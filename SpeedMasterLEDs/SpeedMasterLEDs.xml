@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<GMA3 DataVersion="1.9.3.3">
+	<Plugin Name="Speed Master LEDs" Version="1.0.0.0">
+		<ComponentLua Name="SpeedMasterLEDs" FileName="SpeedMasterLEDs.lua" />
+	</Plugin>
+</GMA3>

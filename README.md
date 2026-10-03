@@ -1,5 +1,7 @@
 # Pixel Grid Builder for grandMA3
 
+> Also in this repo: **[Speed Master LEDs](SpeedMasterLEDs/README.md)**. It flashes executor key and encoder LEDs in time with a speed master's BPM.
+
 A grandMA3 Lua plugin that builds **selection grids** (stored as groups) and **layout views** for multi-instance pixel fixtures. It handles pixel washes, pixel lines and bars, matrices, multi-row strobe bars like the Chauvet Color STRIKE M, and any other pixel arrangement you can type.
 
 You pick a shape, list your fixtures and press Build. For every fixture the plugin places each pixel (subfixture) in the selection grid with the `Grid x/y` keyword. It then stores:
@@ -146,6 +148,7 @@ The geometry and the full dialog → command flow run against a small grandMA3 m
 
 ```
 lua tests/run_tests.lua      # Lua 5.3 or 5.4
+lua tests/run_speed_master_leds_tests.lua      # Speed Master LEDs
 ```
 
 The mock checks that every pixel lands in its own grid cell and that only known commands are sent. It can't prove how a real console reacts, so do a test run in onPC.
