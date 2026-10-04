@@ -155,7 +155,105 @@ function M.new()
     return "Syntax Error"
   end
 
+  -- UI objects ---------------------------------------------------------------
+  -- Plain tables: properties are stored as fields. [1] / [2] are the row /
+  -- column definition collections of a grid.
+  local UIMT = {}
+  local function uiObj(cls, parent)
+    return setmetatable({ _class = cls, _children = {}, _parent = parent, _valid = true }, UIMT)
+  end
+  local function invalidate(o)
+    o._valid = false
+    for _, c in ipairs(o._children) do invalidate(c) end
+  end
+  UIMT.__index = function(t, k)
+    if k == "Append" then
+      return function(self, cls)
+        if S.failAppend then error("Append is not available") end
+        local child = uiObj(cls, self)
+        self._children[#self._children + 1] = child
+        return child
+      end
+    end
+    if k == "ClearUIChildren" then
+      return function(self)
+        for _, c in ipairs(self._children) do invalidate(c) end
+        self._children = {}
+      end
+    end
+    if k == 1 or k == 2 then
+      local coll = setmetatable({}, { __index = function(c, i) local d = {}; rawset(c, i, d); return d end })
+      rawset(t, k, coll)
+      return coll
+    end
+    return nil
+  end
+  -- Optionally fire TextChanged as soon as an edit gets its first Content,
+  -- the way a console might while the window is being built.
+  UIMT.__newindex = function(t, k, v)
+    rawset(t, k, v)
+    if S.fireOnContent and (k == "Content" or k == "TextChanged")
+      and rawget(t, "Content") ~= nil and rawget(t, "TextChanged") and S.signals[rawget(t, "TextChanged")] then
+      S.signals[rawget(t, "TextChanged")](t)
+    end
+  end
+  S.overlay = uiObj("ScreenOverlay")
+  S.display = { ScreenOverlay = S.overlay, W = 1920, H = 1080 }
+  S.signals = {}
+
+  function S.find(name, node)
+    node = node or S.overlay
+    for _, c in ipairs(node._children) do
+      if c.Name == name then return c end
+      local hit = S.find(name, c)
+      if hit then return hit end
+    end
+    return nil
+  end
+  function S.findAll(cls, node, out)
+    node, out = node or S.overlay, out or {}
+    for _, c in ipairs(node._children) do
+      if c._class == cls then out[#out + 1] = c end
+      S.findAll(cls, c, out)
+    end
+    return out
+  end
+  function S.click(name)
+    local o = assert(S.find(name), "no UI object named " .. name)
+    S.signals[o.Clicked](o)
+    return o
+  end
+  function S.type(name, text)
+    local o = assert(S.find(name), "no UI object named " .. name)
+    o.Content = text
+    S.signals[o.TextChanged](o)
+    return o
+  end
+  function S.window() return S.overlay._children[1] end
+
   local G = {}
+  G.Obj = {
+    Index = function(o)
+      local parent = type(o) == "table" and rawget(o, "_parent")
+      if not parent then return 1 end
+      for i, c in ipairs(parent._children) do if c == o then return i end end
+      return nil
+    end,
+    Delete = function(parent, index)
+      local o = table.remove(parent._children, index)
+      if o then invalidate(o) end
+    end,
+  }
+  function G.IsObjectValid(o) return type(o) == "table" and o._valid == true or nil end
+  function G.GetDisplayByIndex() return S.display end
+  function G.Root()
+    return { ColorTheme = { ColorGroups = {
+      Global = { Transparent = "transparent", Selected = "selected", PartlySelected = "partly",
+        PartlySelectedPreset = "partlyPreset", ErrorText = "errorText", Text = "text" },
+      Button = { Background = "bg", BackgroundPlease = "please", BackgroundClear = "clear" },
+    } } }
+  end
+
   function G.Cmd(c, undo)
     S.commands[#S.commands + 1] = c
     if undo then S.undoUsed = S.undoUsed + 1 end
@@ -189,7 +287,7 @@ function M.new()
     return nil
   end
   function G.GetSubfixture(idx) return S.patch[idx + 1] end
-  function G.GetFocusDisplay() return {} end
+  function G.GetFocusDisplay() return S.display end
   function G.UserVars() return "uservars" end
   function G.GetVar(_, k) return S.vars[k] end
   function G.SetVar(_, k, v) S.vars[k] = v end

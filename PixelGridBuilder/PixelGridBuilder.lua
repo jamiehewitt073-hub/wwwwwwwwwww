@@ -1,6 +1,6 @@
 --[[
 ================================================================================
-  PIXEL GRID BUILDER - grandMA3 plugin                                  v1.0.0
+  PIXEL GRID BUILDER - grandMA3 plugin                                  v2.0.0
 ================================================================================
   Quickly builds SELECTION GRIDS (stored as groups) and LAYOUT VIEWS for
   multi-instance pixel fixtures:
@@ -11,15 +11,19 @@
     * multi-row bars - strobe tube + RGB rows (Color STRIKE M / JDC1 style)
     * anything else  - type a custom pixel map
 
-  For every fixture in your list it places each pixel (subfixture) in the
-  selection grid with the "Grid x/y" keyword, then stores:
+  Run the plugin: a window opens. Tap a shape, check the live preview, enter
+  your fixtures, tick Group / Layout and tap Build. "Advanced..." shows the
+  rest (rotation, fixtures per row, pixel order, sub-IDs, saved presets).
+
+  For every fixture it places each pixel (subfixture) in the selection grid
+  with the "Grid x/y" keyword, then stores:
     * one group with the whole pixel grid
     * optionally one group per part (e.g. "Tubes" / "Face", "Center" / "Ring 1")
     * optionally a layout view with every pixel at its physical position
     * optionally the pixel shape to the fixture type (GridStore)
 
-  Run the plugin and pick a shape. Use "Inspect fixture" first if you are not
-  sure how your fixture's subfixtures are numbered.
+  Run it with the argument "classic" for the old step-by-step dialogs:
+    Plugin "Pixel Grid Builder" "classic"
 
   Edit SETTINGS and USER_PRESETS below to taste.
 ================================================================================
@@ -53,9 +57,10 @@ local SETTINGS = {
 
 --------------------------------------------------------------------------------
 -- USER PRESETS
--- Add your own fixtures here. They show up at the top of the shape list.
+-- Add your own fixtures here. They show up at the top of the Presets list.
+-- (You can also save presets straight from the window: Advanced > Save preset.)
 --   kind   = "line" | "matrix" | "rows" | "hex" | "rings" | "custom"
---   values = shape fields (see the matching dialog), anything left out uses
+--   values = shape fields (see KIND_INFO below), anything left out uses
 --            the normal default
 --   name   = default name for groups / layout
 --   gap    = default gap (cells) between fixtures
@@ -72,23 +77,17 @@ local USER_PRESETS = {
 -- BUILT-IN PRESETS
 --------------------------------------------------------------------------------
 local PRESETS = {
-  { label = "Pixel line / bar",                          kind = "line" },
-  { label = "Matrix / panel",                            kind = "matrix" },
-  { label = "Multi-row bar (strobe tube + RGB rows)",    kind = "rows" },
-  { label = "Hex pixel wash (center + rings)",           kind = "hex" },
-  { label = "Ring pixel wash (your own ring counts)",    kind = "rings" },
-  { label = "Custom pixel map (type the layout)",        kind = "custom" },
-  { label = "Quick: Color STRIKE M style - tube/face/tube 3 x 14", kind = "rows",
+  { label = "Color STRIKE M style - tube/face/tube 3 x 14", kind = "rows",
     values = { counts = "14,14,14", names = "Tubes,Face,Tubes" }, name = "StrikeM", gap = 1 },
-  { label = "Quick: Hex 19 - Spiider / B-EYE K10 style", kind = "hex",
+  { label = "Hex 19 - Spiider / B-EYE K10 style", kind = "hex",
     values = { rings = 2 }, name = "Hex19", gap = 1 },
-  { label = "Quick: Hex 37 - B-EYE K20 style",           kind = "hex",
+  { label = "Hex 37 - B-EYE K20 style", kind = "hex",
     values = { rings = 3 }, name = "Hex37", gap = 1 },
-  { label = "Quick: Matrix 5 x 5 - MagicPanel FX style", kind = "matrix",
+  { label = "Matrix 5 x 5 - MagicPanel FX style", kind = "matrix",
     values = { cols = 5, rows = 5 }, name = "Panel5x5", gap = 1 },
-  { label = "Quick: Matrix 6 x 6 - MagicPanel 602 style", kind = "matrix",
+  { label = "Matrix 6 x 6 - MagicPanel 602 style", kind = "matrix",
     values = { cols = 6, rows = 6 }, name = "Panel6x6", gap = 1 },
-  { label = "Quick: Pixel bar 20 - impression X4 Bar 20 style", kind = "line",
+  { label = "Pixel bar 20 - impression X4 Bar 20 style", kind = "line",
     values = { count = 20 }, name = "Bar20", gap = 0 },
 }
 
@@ -97,74 +96,78 @@ local ITEM_INSPECT = "Inspect fixture (list its subfixtures)"
 local ITEM_HELP = "Help"
 
 --------------------------------------------------------------------------------
--- SHAPE DIALOG FIELDS
+-- SHAPE FIELDS
 -- type: "int" | "text" | "bool"
+-- basic = shown in the simple window, the rest live under Advanced.
+-- short = label used in the window.
 --------------------------------------------------------------------------------
+local KIND_ORDER = { "line", "matrix", "rows", "hex", "rings", "custom" }
+
 local KIND_INFO = {
   line = {
-    title = "Pixel line",
+    title = "Pixel line", menu = "Pixel line / bar", short = "Line",
     name = "Line",
     gap = 0,
     fields = {
-      { key = "count",    label = "Pixels",               type = "int",  default = 10, min = 1, max = 2048 },
-      { key = "vertical", label = "Vertical",              type = "bool", default = false },
-      { key = "reverse",  label = "Pixel 1 at the end",    type = "bool", default = false },
+      { key = "count",    label = "Pixels",             type = "int",  default = 10, min = 1, max = 2048, basic = true },
+      { key = "vertical", label = "Vertical",           type = "bool", default = false },
+      { key = "reverse",  label = "Pixel 1 at the end", type = "bool", default = false, short = "Pixel 1 at end" },
     },
   },
   matrix = {
-    title = "Matrix / panel",
+    title = "Matrix / panel", menu = "Matrix / panel", short = "Matrix",
     name = "Matrix",
     gap = 1,
     fields = {
-      { key = "cols",        label = "Columns",                  type = "int",  default = 6, min = 1, max = 512 },
-      { key = "rows",        label = "Rows",                     type = "int",  default = 6, min = 1, max = 512 },
-      { key = "columnOrder", label = "Count down columns first", type = "bool", default = false },
-      { key = "snake",       label = "Snake / zig-zag",          type = "bool", default = false },
-      { key = "startRight",  label = "Pixel 1 on the right",     type = "bool", default = false },
-      { key = "startBottom", label = "Pixel 1 at the bottom",    type = "bool", default = false },
+      { key = "cols",        label = "Columns",                  type = "int",  default = 6, min = 1, max = 512, basic = true },
+      { key = "rows",        label = "Rows",                     type = "int",  default = 6, min = 1, max = 512, basic = true },
+      { key = "columnOrder", label = "Count down columns first", type = "bool", default = false, short = "Columns first" },
+      { key = "snake",       label = "Snake / zig-zag",          type = "bool", default = false, short = "Snake" },
+      { key = "startRight",  label = "Pixel 1 on the right",     type = "bool", default = false, short = "Start right" },
+      { key = "startBottom", label = "Pixel 1 at the bottom",    type = "bool", default = false, short = "Start bottom" },
     },
   },
   rows = {
-    title = "Multi-row bar",
+    title = "Multi-row bar", menu = "Multi-row bar (strobe tube + RGB rows)", short = "Multi-row",
     name = "Bar",
     gap = 1,
     message = "One number per row, top to bottom, in the order the pixels are numbered.\n"
       .. "Rows with the same name end up in the same part group.",
     fields = {
-      { key = "counts", label = "Pixels per row",        type = "text", default = "14,14,14" },
-      { key = "names",  label = "Row names (parts)",     type = "text", default = "Tubes,Face,Tubes" },
-      { key = "rtl",    label = "Pixel 1 on the right",  type = "bool", default = false },
-      { key = "snake",  label = "Snake rows",            type = "bool", default = false },
+      { key = "counts", label = "Pixels per row",       type = "text", default = "14,14,14", basic = true },
+      { key = "names",  label = "Row names (parts)",    type = "text", default = "Tubes,Face,Tubes", short = "Row names" },
+      { key = "rtl",    label = "Pixel 1 on the right", type = "bool", default = false, short = "Start right" },
+      { key = "snake",  label = "Snake rows",           type = "bool", default = false },
     },
   },
   hex = {
-    title = "Hex pixel wash",
+    title = "Hex pixel wash", menu = "Hex pixel wash (center + rings)", short = "Hex",
     name = "Hex",
     gap = 1,
     message = "Rings around the center: 1 = 7 pixels, 2 = 19, 3 = 37, 4 = 61.",
     fields = {
-      { key = "rings",     label = "Rings",                       type = "int",  default = 2, min = 0, max = 10 },
-      { key = "start",     label = "Start angle (0 = 12 o'clock)", type = "int",  default = 0, min = 0, max = 359 },
-      { key = "ccw",       label = "Counter-clockwise",           type = "bool", default = false },
-      { key = "outsideIn", label = "Outer ring first",            type = "bool", default = false },
+      { key = "rings",     label = "Rings",                        type = "int",  default = 2, min = 0, max = 10, basic = true },
+      { key = "start",     label = "Start angle (0 = 12 o'clock)", type = "int",  default = 0, min = 0, max = 359, step = 30, short = "Start angle" },
+      { key = "ccw",       label = "Counter-clockwise",            type = "bool", default = false },
+      { key = "outsideIn", label = "Outer ring first",             type = "bool", default = false },
     },
   },
   rings = {
-    title = "Ring pixel wash",
+    title = "Ring pixel wash", menu = "Ring pixel wash (your own ring counts)", short = "Rings",
     name = "Rings",
     gap = 1,
     message = "Pixels per ring from the inside out. Start with 1 for a center pixel.\n"
       .. "Example: 1,6,12  or  8,16,24",
     fields = {
-      { key = "counts",    label = "Pixels per ring",             type = "text", default = "1,6,12" },
-      { key = "start",     label = "Start angle (0 = 12 o'clock)", type = "int",  default = 0, min = 0, max = 359 },
-      { key = "scale",     label = "Grid scale (0 = auto)",       type = "int",  default = 0, min = 0, max = 32 },
-      { key = "ccw",       label = "Counter-clockwise",           type = "bool", default = false },
-      { key = "outsideIn", label = "Outer ring first",            type = "bool", default = false },
+      { key = "counts",    label = "Pixels per ring",              type = "text", default = "1,6,12", basic = true },
+      { key = "start",     label = "Start angle (0 = 12 o'clock)", type = "int",  default = 0, min = 0, max = 359, step = 30, short = "Start angle" },
+      { key = "scale",     label = "Grid scale (0 = auto)",        type = "int",  default = 0, min = 0, max = 32, short = "Grid scale" },
+      { key = "ccw",       label = "Counter-clockwise",            type = "bool", default = false },
+      { key = "outsideIn", label = "Outer ring first",             type = "bool", default = false },
     },
   },
   custom = {
-    title = "Custom pixel map",
+    title = "Custom pixel map", menu = "Custom pixel map (type the layout)", short = "Custom",
     name = "Custom",
     gap = 1,
     message = "Type the pixel sub-IDs as they sit on the fixture.\n"
@@ -173,27 +176,27 @@ local KIND_INFO = {
       .. "  Name:  at the start of a row starts a new part (group)\n"
       .. "Example:  Tubes: 1-14 / Face: 15-28 / Tubes: 29-42",
     fields = {
-      { key = "map", label = "Pixel map", type = "text", default = "1 2 3 / 8 . 4 / 7 6 5" },
+      { key = "map", label = "Pixel map", type = "text", default = "1 2 3 / 8 . 4 / 7 6 5", basic = true },
     },
   },
 }
 
 local RIG_FIELDS = {
-  { key = "fixtures",    label = "Fixtures",                    type = "text", default = "101 Thru 110" },
-  { key = "subs",        label = "Pixel sub-IDs",               type = "text", default = "auto" },
-  { key = "perRow",      label = "Fixtures per row (0 = one row)", type = "int", default = 0, min = 0, max = 9999 },
-  { key = "gap",         label = "Gap between fixtures",        type = "int",  default = 1, min = 0, max = 100 },
-  { key = "rotate",      label = "Rotate (0/90/180/270)",       type = "int",  default = 0, min = 0, max = 270 },
-  { key = "name",        label = "Name",                        type = "text", default = "Pixels" },
-  { key = "group",       label = "Group no. (0 = none)",        type = "int",  default = 1, min = 0, max = 99999 },
-  { key = "layout",      label = "Layout no. (0 = none)",       type = "int",  default = 1, min = 0, max = 99999 },
-  { key = "cellSize",    label = "Layout cell size",            type = "int",  default = 40, min = 4, max = 1000 },
-  { key = "flipH",       label = "Flip left-right",             type = "bool", default = false },
-  { key = "flipV",       label = "Flip up-down",                type = "bool", default = false },
-  { key = "alternate",   label = "Turn every 2nd fixture 180",  type = "bool", default = false },
-  { key = "partGroups",  label = "Also store one group per part", type = "bool", default = true },
-  { key = "gridStore",   label = "GridStore shape to fixture type", type = "bool", default = false },
-  { key = "keepSel",     label = "Keep the grid selected",      type = "bool", default = true },
+  { key = "fixtures",   label = "Fixtures",                        type = "text", default = "101 Thru 110" },
+  { key = "subs",       label = "Pixel sub-IDs",                   type = "text", default = "auto" },
+  { key = "perRow",     label = "Fixtures per row (0 = one row)",  type = "int",  default = 0, min = 0, max = 9999, short = "Per row" },
+  { key = "gap",        label = "Gap between fixtures",            type = "int",  default = 1, min = 0, max = 100, short = "Gap" },
+  { key = "rotate",     label = "Rotate (0/90/180/270)",           type = "int",  default = 0, min = 0, max = 270 },
+  { key = "name",       label = "Name",                            type = "text", default = "Pixels" },
+  { key = "group",      label = "Group no. (0 = none)",            type = "int",  default = 1, min = 0, max = 99999, guiMin = 1 },
+  { key = "layout",     label = "Layout no. (0 = none)",           type = "int",  default = 1, min = 0, max = 99999, guiMin = 1 },
+  { key = "cellSize",   label = "Layout cell size",                type = "int",  default = 40, min = 4, max = 1000, step = 5, short = "Cell size" },
+  { key = "flipH",      label = "Flip left-right",                 type = "bool", default = false },
+  { key = "flipV",      label = "Flip up-down",                    type = "bool", default = false },
+  { key = "alternate",  label = "Turn every 2nd fixture 180",      type = "bool", default = false },
+  { key = "partGroups", label = "Also store one group per part",   type = "bool", default = true },
+  { key = "gridStore",  label = "GridStore shape to fixture type", type = "bool", default = false },
+  { key = "keepSel",    label = "Keep the grid selected",          type = "bool", default = true },
 }
 
 local HELP_TEXT = [[
@@ -215,6 +218,27 @@ Not sure how your fixture's pixels are numbered? Use "Inspect fixture"
 
 Pixels in the wrong order? Change the start angle / direction / snake
 options, or reorder the Pixel sub-IDs list.]]
+
+local GUI_HELP = [[
+1. Tap the shape of your fixture (Line, Matrix, Multi-row, Hex, Rings,
+   Custom) or pick one from Presets.
+2. Set the pixel count. The preview shows pixel 1, 2, 3 ... of one fixture.
+3. Fixtures: type  101 Thru 116,  101-108 + 201-208,  Group 5,
+   or tap Use selection.
+4. Tick Group and / or Layout, check the numbers, tap Build.
+   The window stays open: change something and Build again to replace it.
+
+Advanced...
+  Rotate / flip       how the fixtures hang
+  Per row / Gap       how the fixtures sit next to each other
+                      (with a selection or a group and Per row 0, their
+                      own grid arrangement is kept)
+  Pixel order         start corner, direction, snake ...
+  Pixel sub-IDs       auto = patch order, or type them in pixel order,
+                      e.g. 15-28, 1-14, 29-42.  Inspect shows the numbering.
+  Part groups         one extra group per part (Tubes / Face, rings ...)
+  GridStore           store the shape on the fixture type
+  Save preset         keep the current setup in the Presets list]]
 
 --------------------------------------------------------------------------------
 -- PURE HELPERS (no grandMA3 API in here)
@@ -722,6 +746,15 @@ function P.place(fixtures, slots, shapeA, shapeB, gap)
   return placed
 end
 
+-- Width and height of the whole pixel grid, as P.place would lay it out.
+function P.gridSize(shape, slots, gap)
+  local mx, my = 0, 0
+  for _, s in ipairs(slots) do
+    mx = math.max(mx, s.x); my = math.max(my, s.y)
+  end
+  return (mx + 1) * (shape.gw + gap) - gap, (my + 1) * (shape.gh + gap) - gap
+end
+
 -- Top-to-bottom, left-to-right: the order a grid is read in.
 function P.sortCells(cells)
   local out = {}
@@ -847,17 +880,24 @@ function MA.endUndo()
   undoHandle = nil
 end
 
-function MA.getVar(key, default)
-  if not SETTINGS.rememberValues then return default end
+function MA.getVarRaw(key, default)
   local ok, v = pcall(function() return GetVar(UserVars(), "PGB_" .. key) end)
   if ok and v ~= nil and tostring(v) ~= "" then return tostring(v) end
   return default
 end
 
-function MA.setVar(key, value)
-  if not SETTINGS.rememberValues then return end
+function MA.setVarRaw(key, value)
   if type(value) == "boolean" then value = value and "1" or "0" end
   pcall(function() SetVar(UserVars(), "PGB_" .. key, tostring(value)) end)
+end
+
+function MA.getVar(key, default)
+  if not SETTINGS.rememberValues then return default end
+  return MA.getVarRaw(key, default)
+end
+
+function MA.setVar(key, value)
+  if SETTINGS.rememberValues then MA.setVarRaw(key, value) end
 end
 
 function MA.poolObject(pool, no)
@@ -1039,11 +1079,11 @@ function UI.ask(title, text, yes, no)
 end
 
 -- Shows a list, returns the chosen item string (or nil).
-function UI.choose(title, items)
-  local ok, idx, value = pcall(PopupInput, { title = title, caller = focusDisplay(), items = items })
+function UI.choose(title, items, caller)
+  local ok, idx, value = pcall(PopupInput, { title = title, caller = caller or focusDisplay(), items = items })
   if ok then
     if type(value) == "string" and value ~= "" then return value end
-    if type(idx) == "number" then return items[idx + 1] end
+    if type(idx) == "number" then return items[idx] end
     return nil
   end
   -- Fallback when PopupInput isn't available: pick by number.
@@ -1122,14 +1162,16 @@ end
 --------------------------------------------------------------------------------
 -- INSPECT
 --------------------------------------------------------------------------------
-local function Inspect()
-  local default = MA.getVar("inspect", "101")
-  local sel = MA.readSelection()
-  if #sel > 0 then default = tostring(sel[1].fid) end
-  local ok, text = pcall(TextInput, "Inspect fixture - fixture ID", default)
-  if not ok or not text or P.trim(text) == "" then return end
-  local fid = P.toInt(text, 1)
-  if not fid then UI.error("'" .. tostring(text) .. "' isn't a fixture ID.") return end
+local function Inspect(fid)
+  if not fid then
+    local default = MA.getVar("inspect", "101")
+    local sel = MA.readSelection()
+    if #sel > 0 then default = tostring(sel[1].fid) end
+    local ok, text = pcall(TextInput, "Inspect fixture - fixture ID", default)
+    if not ok or not text or P.trim(text) == "" then return end
+    fid = P.toInt(text, 1)
+    if not fid then UI.error("'" .. tostring(text) .. "' isn't a fixture ID.") return end
+  end
   MA.setVar("inspect", fid)
 
   local leaves, tree, err, name = MA.subfixtureTree(fid)
@@ -1535,19 +1577,24 @@ local function Build(def)
 end
 
 --------------------------------------------------------------------------------
--- MAIN
+-- CLASSIC DIALOGS (fallback, or run the plugin with the argument "classic")
 --------------------------------------------------------------------------------
-local function allPresets()
+local function classicEntries()
   local list = {}
   for _, p in ipairs(USER_PRESETS) do
     if KIND_INFO[p.kind] then list[#list + 1] = p end
   end
-  for _, p in ipairs(PRESETS) do list[#list + 1] = p end
+  for _, kind in ipairs(KIND_ORDER) do
+    list[#list + 1] = { label = KIND_INFO[kind].menu, kind = kind }
+  end
+  for _, p in ipairs(PRESETS) do
+    list[#list + 1] = { label = "Quick: " .. p.label, kind = p.kind, values = p.values, name = p.name, gap = p.gap }
+  end
   return list
 end
 
-local function Main(displayHandle, argument)
-  local presets = allPresets()
+local function Classic()
+  local presets = classicEntries()
   local items = {}
   for i, p in ipairs(presets) do items[i] = p.label end
   items[#items + 1] = ITEM_INSPECT
@@ -1562,9 +1609,848 @@ local function Main(displayHandle, argument)
   end
 end
 
+--------------------------------------------------------------------------------
+-- WINDOW
+-- One window built from grandMA3 UI objects on the screen overlay. Buttons,
+-- edits and check boxes call the PGB_* signal handlers below. While the
+-- window is open the plugin waits in GUI.loop(); slow work (build, popups,
+-- redrawing the window) is handed to that loop so it runs in the plugin's
+-- own coroutine.
+--------------------------------------------------------------------------------
+local GUI = { created = {}, leafCache = {}, session = 0, w = {} }
+
+local SIG_TEXT, SIG_TOGGLE, SIG_CLICK = "PGB_Text", "PGB_Toggle", "PGB_Click"
+local NEXT_ROTATION = { [0] = 90, [90] = 180, [180] = 270, [270] = 0 }
+local PRESET_RIG_KEYS = { "subs", "perRow", "gap", "rotate", "flipH", "flipV", "alternate", "partGroups", "name", "cellSize" }
+local PART_COLORS = { "Global.Selected", "Global.PartlySelected", "Global.PartlySelectedPreset", "Button.BackgroundPlease" }
+
+-- Sets UI properties one by one, so one unknown property can't stop the rest.
+local function uiSet(obj, props)
+  if obj == nil then return nil end
+  for k, v in pairs(props) do
+    pcall(function() obj[k] = v end)
+  end
+  return obj
+end
+
+local function themeColor(path)
+  local ok, c = pcall(function()
+    local node = Root().ColorTheme.ColorGroups
+    for part in path:gmatch("[^%.]+") do node = node[part] end
+    return node
+  end)
+  if ok then return c end
+  return nil
+end
+
+local function isValid(obj)
+  if obj == nil then return false end
+  if IsObjectValid then
+    local ok, v = pcall(IsObjectValid, obj)
+    if ok then return v and true or false end
+  end
+  return (pcall(function() return obj.Name end))
+end
+
+-- Widget specs -----------------------------------------------------------------
+local function Lbl(text, w, align, id) return { type = "label", text = text, w = w, align = align, id = id } end
+local function Edit(scope, key, w) return { type = "edit", scope = scope, key = key, w = w } end
+local function Btn(text, name, w, opts)
+  local s = { type = "button", text = text, name = name, w = w }
+  for k, v in pairs(opts or {}) do s[k] = v end
+  return s
+end
+local function Chk(scope, key, text, w) return { type = "check", scope = scope, key = key, text = text, w = w } end
+local function Space(w) return { type = "space", w = w } end
+local function Num(scope, key, label, labelW)
+  if labelW == nil then labelW = 150 end
+  return {
+    Lbl(label, labelW or nil, "Right"),
+    Btn("-", "pgb_dec_" .. scope .. "_" .. key, 56),
+    Edit(scope, key, 90),
+    Btn("+", "pgb_inc_" .. scope .. "_" .. key, 56),
+  }
+end
+
+-- Collects specs and lists of specs into one flat list.
+local function specList()
+  local list = {}
+  local function push(...)
+    for _, item in ipairs({ ... }) do
+      if item.type then
+        list[#list + 1] = item
+      else
+        for _, s in ipairs(item) do list[#list + 1] = s end
+      end
+    end
+  end
+  return list, push
+end
+
+-- State --------------------------------------------------------------------------
+function GUI.fieldDef(scope, key)
+  local fields = (scope == "shape") and KIND_INFO[GUI.state.kind].fields or RIG_FIELDS
+  for _, f in ipairs(fields) do
+    if f.key == key then return f end
+  end
+  return nil
+end
+
+function GUI.value(scope, key)
+  if scope == "shape" then return GUI.state.shape[GUI.state.kind][key] end
+  return GUI.state.rig[key]
+end
+
+function GUI.setValue(scope, key, v)
+  if scope == "shape" then
+    GUI.state.shape[GUI.state.kind][key] = v
+  else
+    GUI.state.rig[key] = v
+  end
+end
+
+function GUI.loadState()
+  local st = { shape = {}, advanced = P.toBool(MA.getVar("gui.advanced", "0")) }
+  st.kind = MA.getVar("gui.kind", "line")
+  if not KIND_INFO[st.kind] then st.kind = "line" end
+  st.presetLabel = MA.getVar("gui.preset", nil)
+  for kind, info in pairs(KIND_INFO) do
+    st.shape[kind] = initialValues(info.fields, "shape." .. kind .. ".", nil)
+  end
+  st.rig = initialValues(RIG_FIELDS, "rig.", nil)
+  if MA.getVar("rig.gap", nil) == nil then st.rig.gap = KIND_INFO[st.kind].gap end
+  if MA.getVar("rig.name", nil) == nil then st.rig.name = KIND_INFO[st.kind].name end
+  st.rig.groupOn = P.toBool(MA.getVar("rig.groupOn", "1"))
+  st.rig.layoutOn = P.toBool(MA.getVar("rig.layoutOn", "1"))
+  if MA.selectionCount() > 0 then st.rig.fixtures = "sel" end
+  -- Suggest the next free pool slots from where the last build went.
+  local shape = P.buildShape(st.kind, st.shape[st.kind])
+  local parts = shape and #shape.parts or 1
+  st.rig.group = MA.firstFree("Groups", (parts > 1) and (parts + 1) or 1, P.toInt(st.rig.group, 1) or 1)
+  st.rig.layout = MA.firstFree("Layouts", 1, P.toInt(st.rig.layout, 1) or 1)
+  return st
+end
+
+function GUI.saveState()
+  local st = GUI.state
+  if not st then return end
+  MA.setVar("gui.kind", st.kind)
+  MA.setVar("gui.advanced", st.advanced)
+  MA.setVar("gui.preset", st.presetLabel or "")
+  for kind, info in pairs(KIND_INFO) do
+    saveValues(info.fields, "shape." .. kind .. ".", st.shape[kind])
+  end
+  saveValues(RIG_FIELDS, "rig.", st.rig)
+  MA.setVar("rig.groupOn", P.toBool(st.rig.groupOn))
+  MA.setVar("rig.layoutOn", P.toBool(st.rig.layoutOn))
+end
+
+function GUI.rigValues()
+  local r = {}
+  for k, v in pairs(GUI.state.rig) do r[k] = v end
+  if not P.toBool(r.groupOn) then r.group = 0 end
+  if not P.toBool(r.layoutOn) then r.layout = 0 end
+  return r
+end
+
+-- Saved presets: one user variable, "|" between presets, ";" between fields.
+local function encode(s)
+  return (tostring(s):gsub("[^%w _%.,%-]", function(c) return string.format("%%%02X", c:byte()) end))
+end
+local function decode(s)
+  return (s:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end))
+end
+
+function GUI.loadSaved()
+  local list = {}
+  for entry in MA.getVarRaw("presets", ""):gmatch("[^|]+") do
+    local p = { values = {}, rig = {} }
+    for field in entry:gmatch("[^;]+") do
+      local k, v = field:match("^([^=]*)=(.*)$")
+      if k then
+        k, v = decode(k), decode(v)
+        if k == "label" then p.label = v
+        elseif k == "kind" then p.kind = v
+        elseif k:sub(1, 2) == "s." then p.values[k:sub(3)] = v
+        elseif k:sub(1, 2) == "r." then p.rig[k:sub(3)] = v end
+      end
+    end
+    if p.label and KIND_INFO[p.kind] then list[#list + 1] = p end
+  end
+  return list
+end
+
+function GUI.storeSaved(list)
+  local entries = {}
+  for _, p in ipairs(list) do
+    local fields = { "label=" .. encode(p.label), "kind=" .. encode(p.kind) }
+    for k, v in pairs(p.values) do fields[#fields + 1] = "s." .. encode(k) .. "=" .. encode(v) end
+    for k, v in pairs(p.rig) do fields[#fields + 1] = "r." .. encode(k) .. "=" .. encode(v) end
+    entries[#entries + 1] = table.concat(fields, ";")
+  end
+  MA.setVarRaw("presets", table.concat(entries, "|"))
+end
+
+function GUI.applyPreset(p, label)
+  local st, info = GUI.state, KIND_INFO[p.kind]
+  st.kind = p.kind
+  local vals = {}
+  for _, f in ipairs(info.fields) do vals[f.key] = f.default end
+  for k, v in pairs(p.values or {}) do vals[k] = v end
+  st.shape[p.kind] = vals
+  st.rig.name = p.name or info.name
+  st.rig.gap = p.gap or info.gap
+  for k, v in pairs(p.rig or {}) do st.rig[k] = v end
+  st.presetLabel = label or p.label
+  GUI.lastResult = nil
+end
+
+-- Drawing ------------------------------------------------------------------------
+function GUI.widget(grid, col, s)
+  local anchors = col .. ",0"
+  local margin = { left = 2, right = 2, top = 4, bottom = 4 }
+  local o
+  if s.type == "label" then
+    o = grid:Append("UIObject")
+    uiSet(o, { Anchors = anchors, Text = s.text, TextalignmentH = s.align or "Left", HasHover = "No",
+      BackColor = themeColor("Global.Transparent"), Font = "Medium20", TextAutoAdjust = "Yes",
+      Padding = { left = 8, right = 8, top = 0, bottom = 0 } })
+  elseif s.type == "edit" then
+    o = grid:Append("LineEdit")
+    local f = GUI.fieldDef(s.scope, s.key)
+    local numeric = f and f.type == "int"
+    local value = GUI.value(s.scope, s.key)
+    uiSet(o, { Anchors = anchors, Name = "pgb_txt_" .. s.scope .. "_" .. s.key,
+      Content = tostring(value == nil and "" or value), Message = f and f.label or s.key,
+      TextChanged = SIG_TEXT, PluginComponent = myHandle,
+      Filter = numeric and "0123456789" or nil, VkPluginName = numeric and "TextInputNumOnly" or "TextInput",
+      MaxTextLength = numeric and 6 or 1024, Font = "Medium20", TextAutoAdjust = "Yes", Margin = margin })
+    GUI.w.edits[s.scope .. "_" .. s.key] = o
+  elseif s.type == "button" then
+    o = grid:Append("Button")
+    local color = (s.please and themeColor("Button.BackgroundPlease"))
+      or (s.selected and themeColor("Global.Selected")) or nil
+    uiSet(o, { Anchors = anchors, Name = s.name, Text = s.text, Clicked = SIG_CLICK, PluginComponent = myHandle,
+      Font = "Medium20", HasHover = "Yes", TextalignmentH = "Centre", Textshadow = 1, BackColor = color,
+      Margin = margin })
+  elseif s.type == "check" then
+    o = grid:Append("CheckBox")
+    uiSet(o, { Anchors = anchors, Name = "pgb_chk_" .. s.scope .. "_" .. s.key, Text = s.text,
+      State = P.toBool(GUI.value(s.scope, s.key)) and 1 or 0, Clicked = SIG_TOGGLE, PluginComponent = myHandle,
+      TextalignmentH = "Left", ColorIndicator = themeColor("Global.Selected"), Font = "Medium20", Margin = margin })
+  end
+  if o and s.id then GUI.w[s.id] = o end
+  return o
+end
+
+-- One row of the window: a 1-row grid, fixed-width columns where w is set.
+function GUI.row(frame, index, specs)
+  local g = frame:Append("UILayoutGrid")
+  uiSet(g, { Anchors = "0," .. index })
+  uiSet(g, { Columns = #specs, Rows = 1 })
+  for i, s in ipairs(specs) do
+    if s.w then
+      local size = tostring(math.floor(s.w * (GUI.scale or 1)))
+      pcall(function() uiSet(g[2][i], { SizePolicy = "Fixed", Size = size }) end)
+    end
+  end
+  for i, s in ipairs(specs) do GUI.widget(g, i - 1, s) end
+  return g
+end
+
+function GUI.displaySize()
+  local ok, w, h = pcall(function() return tonumber(GUI.display.W), tonumber(GUI.display.H) end)
+  if ok and w and h and w > 0 and h > 0 then return w, h end
+  return 1920, 1080
+end
+
+-- Builds (or rebuilds) the whole window from GUI.state.
+function GUI.render()
+  local st = GUI.state
+  local info = KIND_INFO[st.kind]
+  if isValid(GUI.dialog) then pcall(function() Obj.Delete(GUI.overlay, Obj.Index(GUI.dialog)) end) end
+  GUI.w = { edits = {} }
+  GUI.previewSig = nil
+
+  local rows = {}
+  local function addRow(h, specs) rows[#rows + 1] = { h = h, specs = specs } end
+
+  -- Shape tiles
+  local tiles = {}
+  for _, kind in ipairs(KIND_ORDER) do
+    tiles[#tiles + 1] = Btn(KIND_INFO[kind].short, "pgb_kind_" .. kind, nil, { selected = (kind == st.kind) })
+  end
+  tiles[#tiles + 1] = Btn("Presets...", "pgb_presets")
+  addRow(64, tiles)
+
+  -- Main shape fields
+  local basic, push = specList()
+  local stretch = false
+  for _, f in ipairs(info.fields) do
+    if f.basic then
+      if f.type == "int" then
+        push(Num("shape", f.key, f.short or f.label))
+      else
+        push(Lbl(f.short or f.label, 200, "Right"), Edit("shape", f.key))
+        stretch = true
+      end
+    end
+  end
+  if not stretch then push(Space()) end
+  addRow(56, basic)
+
+  -- Preview (drawn by GUI.drawPreview)
+  rows[#rows + 1] = { h = 0, preview = true }
+  local previewIndex = #rows
+
+  -- Fixtures and output
+  addRow(56, { Lbl("Fixtures", 150, "Right"), Edit("rig", "fixtures"), Btn("Use selection", "pgb_sel", 220) })
+  local out
+  out, push = specList()
+  push(Chk("rig", "groupOn", "Group", 150), Btn("-", "pgb_dec_rig_group", 56), Edit("rig", "group", 90),
+    Btn("+", "pgb_inc_rig_group", 56), Space(24), Chk("rig", "layoutOn", "Layout", 150),
+    Btn("-", "pgb_dec_rig_layout", 56), Edit("rig", "layout", 90), Btn("+", "pgb_inc_rig_layout", 56),
+    Lbl("Name", 100, "Right"), Edit("rig", "name"))
+  addRow(56, out)
+
+  -- Advanced
+  if st.advanced then
+    addRow(52, { Btn("Rotate " .. (P.toInt(st.rig.rotate) or 0), "pgb_rotate", 190),
+      Chk("rig", "flipH", "Flip left-right"), Chk("rig", "flipV", "Flip up-down"),
+      Chk("rig", "alternate", "Turn every 2nd") })
+    local arr
+    arr, push = specList()
+    push(Num("rig", "perRow", "Per row", false), Num("rig", "gap", "Gap", false), Num("rig", "cellSize", "Cell size", false))
+    addRow(52, arr)
+    local values, pushValue = specList()
+    local checks, pushCheck = specList()
+    for _, f in ipairs(info.fields) do
+      if not f.basic then
+        if f.type == "int" then pushValue(Num("shape", f.key, f.short or f.label, 170))
+        elseif f.type == "text" then pushValue(Lbl(f.short or f.label, 170, "Right"), Edit("shape", f.key))
+        else pushCheck(Chk("shape", f.key, f.short or f.label)) end
+      end
+    end
+    if #values > 0 then
+      local hasStretch = false
+      for _, s in ipairs(values) do if not s.w then hasStretch = true end end
+      if not hasStretch then pushValue(Space()) end
+      addRow(52, values)
+    end
+    if #checks > 0 then addRow(52, checks) end
+    if st.kind == "custom" then
+      addRow(52, { Lbl("Custom map: the numbers you type are the sub-IDs."), Btn("Inspect", "pgb_inspect", 160) })
+    else
+      addRow(52, { Lbl("Pixel sub-IDs", 170, "Right"), Edit("rig", "subs"), Btn("Inspect", "pgb_inspect", 160) })
+    end
+    addRow(52, { Chk("rig", "partGroups", "Part groups"), Chk("rig", "gridStore", "GridStore to type"),
+      Chk("rig", "keepSel", "Keep selected"), Btn("Save preset...", "pgb_save", 220) })
+  end
+
+  -- Status and actions
+  addRow(36, { Lbl("", nil, "Left", "info") })
+  addRow(36, { Lbl("", nil, "Left", "note") })
+  addRow(64, { Btn(st.advanced and "Simple view" or "Advanced...", "pgb_adv", 230), Btn("Help", "pgb_help", 130),
+    Space(), Btn("Build", "pgb_build", 260, { please = true, id = "build" }), Btn("Close", "pgb_close", 170) })
+
+  -- Size: the preview gets whatever height is left.
+  local dispW, dispH = GUI.displaySize()
+  local W = math.min(1180, math.floor(dispW * 0.95))
+  GUI.scale = math.min(1, W / 1180)
+  local used = 0
+  for _, r in ipairs(rows) do used = used + r.h end
+  local previewH = st.advanced and 180 or 270
+  local maxH = math.floor(dispH * 0.94)
+  if 80 + used + previewH > maxH then
+    previewH = math.max(110, maxH - 80 - used)
+    if 80 + used + previewH > maxH then
+      -- Small screen: squeeze the rows too.
+      local f = math.max(0.7, (maxH - 80 - previewH) / used)
+      used = 0
+      for _, r in ipairs(rows) do
+        r.h = math.floor(r.h * f)
+        used = used + r.h
+      end
+    end
+  end
+  rows[previewIndex].h = previewH
+  GUI.previewW, GUI.previewH = W - 40, previewH
+
+  local base = GUI.overlay:Append("BaseInput")
+  GUI.dialog = base
+  uiSet(base, { Name = "PixelGridBuilderWindow", W = W, H = 80 + used + previewH, AutoClose = "No", CloseOnEscape = "Yes" })
+  uiSet(base, { Columns = 1, Rows = 2 })
+  pcall(function() uiSet(base[1][1], { SizePolicy = "Fixed", Size = "60" }) end)
+  pcall(function() uiSet(base[1][2], { SizePolicy = "Stretch" }) end)
+
+  local titleBar = base:Append("TitleBar")
+  uiSet(titleBar, { Anchors = "0,0", Texture = "corner2" })
+  uiSet(titleBar, { Columns = 2, Rows = 1 })
+  pcall(function() uiSet(titleBar[2][2], { SizePolicy = "Fixed", Size = "50" }) end)
+  uiSet(titleBar:Append("TitleButton"), { Anchors = "0,0", Texture = "corner1", Icon = "star",
+    Text = TITLE .. "   -   " .. (st.presetLabel or info.title) })
+  uiSet(titleBar:Append("CloseButton"), { Anchors = "1,0", Texture = "corner2" })
+
+  local frame = base:Append("DialogFrame")
+  uiSet(frame, { H = "100%", W = "100%", Anchors = { left = 0, right = 0, top = 1, bottom = 1 } })
+  uiSet(frame, { Columns = 1, Rows = #rows })
+  for i, r in ipairs(rows) do
+    pcall(function() uiSet(frame[1][i], { SizePolicy = "Fixed", Size = tostring(r.h) }) end)
+  end
+  GUI.w.frame = frame
+  GUI.w.previewRow = previewIndex - 1
+  -- Edits may fire their change signal while being filled in: hold refreshes.
+  GUI.building = true
+  local ok, err = pcall(function()
+    for i, r in ipairs(rows) do
+      if not r.preview then GUI.row(frame, i - 1, r.specs) end
+    end
+  end)
+  GUI.building = false
+  if not ok then error(err, 0) end
+  GUI.refresh()
+end
+
+-- The first fixture's pixels as coloured, numbered cells.
+function GUI.drawPreview(shape, message)
+  local sig = message or "x"
+  if shape then
+    local parts = {}
+    for _, c in ipairs(shape.cells) do
+      parts[#parts + 1] = c.gx .. "," .. c.gy .. "," .. tostring(c.order or c.sub) .. "," .. tostring(c.part)
+    end
+    sig = shape.gw .. "x" .. shape.gh .. ":" .. table.concat(parts, ";")
+  end
+  if sig == GUI.previewSig and GUI.w.preview then return end
+
+  local frame = GUI.w.frame
+  if GUI.w.preview then pcall(function() Obj.Delete(frame, Obj.Index(GUI.w.preview)) end) end
+  local box = frame:Append("UILayoutGrid")
+  GUI.w.preview = box
+  GUI.previewSig = sig
+  uiSet(box, { Anchors = "0," .. GUI.w.previewRow })
+
+  local tooBig = shape and (shape.gw > 64 or shape.gh > 40 or #shape.cells > 500)
+  if not shape or tooBig then
+    uiSet(box, { Columns = 1, Rows = 1 })
+    local text = message or string.format("%d x %d cells - too big to draw here, the build is fine.", shape.gw, shape.gh)
+    uiSet(box:Append("UIObject"), { Anchors = "0,0", Text = text, HasHover = "No", Font = "Medium20",
+      BackColor = themeColor("Global.Transparent"), TextAutoAdjust = "Yes" })
+    return
+  end
+
+  -- Pad the grid so cells stay square, and centre the shape.
+  local aspect = GUI.previewW / GUI.previewH
+  local cols = math.max(shape.gw, math.ceil(shape.gh * aspect))
+  local rows = math.max(shape.gh, math.ceil(shape.gw / aspect))
+  if (cols - shape.gw) % 2 == 1 then cols = cols + 1 end
+  if (rows - shape.gh) % 2 == 1 then rows = rows + 1 end
+  local ox, oy = math.floor((cols - shape.gw) / 2), math.floor((rows - shape.gh) / 2)
+  uiSet(box, { Columns = cols, Rows = rows })
+  local showText = math.min(GUI.previewW / cols, GUI.previewH / rows) >= 18
+  local partIndex = {}
+  for i, p in ipairs(shape.parts) do partIndex[p] = i end
+  for _, c in ipairs(shape.cells) do
+    local label = shape.literal and c.sub or c.order
+    uiSet(box:Append("UIObject"), {
+      Anchors = (ox + c.gx) .. "," .. (oy + c.gy),
+      Text = showText and tostring(label or "") or "",
+      BackColor = themeColor(PART_COLORS[((partIndex[c.part] or 1) - 1) % #PART_COLORS + 1]),
+      HasHover = "No", TextAutoAdjust = "Yes", Margin = { left = 1, right = 1, top = 1, bottom = 1 },
+    })
+  end
+end
+
+function GUI.setStatus(info, note, isError)
+  if info then uiSet(GUI.w.info, { Text = info }) end
+  uiSet(GUI.w.note, { Text = note or "", TextColor = themeColor(isError and "Global.ErrorText" or "Global.Text") })
+end
+
+function GUI.setBuildEnabled(on)
+  uiSet(GUI.w.build, { Enabled = on and "Yes" or "No",
+    BackColor = themeColor(on and "Button.BackgroundPlease" or "Button.BackgroundClear") })
+end
+
+-- Reads every edit box back into the state (in case a change signal was missed).
+function GUI.syncEdits()
+  for id, o in pairs(GUI.w.edits or {}) do
+    local scope, key = id:match("^(%a+)_(%w+)$")
+    local ok, content = pcall(function() return o.Content end)
+    if scope and ok and content ~= nil then GUI.setValue(scope, key, tostring(content)) end
+  end
+end
+
+-- Live check -------------------------------------------------------------------
+function GUI.fixtureInfo(rv)
+  local t = P.trim(rv.fixtures):lower()
+  if t == "sel" or t == "selection" or t == "*" then
+    local list = MA.readSelection()
+    if #list == 0 then return { error = "Nothing is selected - select the fixtures or type a list." } end
+    local slots = (rv.perRow > 0) and P.slotsInRows(#list, rv.perRow) or P.slotsFromGrid(list)
+    return { count = #list, slots = slots, first = list[1].fid, source = "selection" }
+  end
+  local g = t:match("^group%s*(%d+)$")
+  if g then return { group = tonumber(g) } end
+  local ids, err = P.parseIdList(rv.fixtures)
+  if not ids then return { error = err } end
+  return { count = #ids, slots = P.slotsInRows(#ids, rv.perRow), first = ids[1] }
+end
+
+function GUI.leaves(fid)
+  if GUI.leafCache[fid] == nil then
+    GUI.leafCache[fid] = MA.subfixtureTree(fid) or false
+  end
+  return GUI.leafCache[fid]
+end
+
+-- Returns text, isError about how the pixels will be numbered.
+function GUI.pixelNote(fid, subs, need)
+  local t = P.trim(subs):lower()
+  if t == "" or t == "auto" then
+    local leaves = GUI.leaves(fid)
+    if leaves == false then return "Fixture " .. fid .. " isn't patched." end
+    if #leaves == 0 then return "Fixture " .. fid .. " has no subfixtures - is it in a pixel mode?" end
+    if #leaves ~= need then
+      return string.format("Fixture %d has %d pixels, the shape %d - you'll be asked which to use.", fid, #leaves, need)
+    end
+    return string.format("Fixture %d: %d pixels, matches.", fid, #leaves)
+  end
+  local list, err = P.parseSubIdList(subs)
+  if not list then return err, true end
+  if #list ~= need then return string.format("%d sub-IDs typed, the shape has %d pixels.", #list, need) end
+  return nil
+end
+
+function GUI.overwriteList(rv, shape)
+  local list = {}
+  if rv.group > 0 then
+    local extra = (rv.partGroups and #shape.parts > 1) and #shape.parts or 0
+    for no = rv.group, rv.group + extra do
+      if MA.poolObject("Groups", no) and not GUI.created["Group " .. no] then list[#list + 1] = "Group " .. no end
+    end
+  end
+  if rv.layout > 0 and MA.poolObject("Layouts", rv.layout) and not GUI.created["Layout " .. rv.layout] then
+    list[#list + 1] = "Layout " .. rv.layout
+  end
+  return list
+end
+
+-- Recomputes the preview, the info line and whether Build is possible.
+function GUI.refresh()
+  local st = GUI.state
+  if GUI.building or not (GUI.w and GUI.w.frame) then return end
+  GUI.syncEdits()
+  local shape, err = P.buildShape(st.kind, st.shape[st.kind])
+  local rv
+  if shape then rv, err = P.coerce(RIG_FIELDS, GUI.rigValues()) end
+  if not shape or not rv then
+    GUI.drawPreview(nil, err)
+    GUI.setStatus("", err, true)
+    GUI.setBuildEnabled(false)
+    return
+  end
+  local shapeA = P.transform(shape, rv.rotate, rv.flipH, rv.flipV)
+  GUI.drawPreview(shapeA)
+
+  local fx = GUI.fixtureInfo(rv)
+  local parts = (#shape.parts > 1) and ("   |   parts: " .. table.concat(shape.parts, ", ")) or ""
+  local info, problem, notes = nil, nil, {}
+  if fx.error then
+    problem = fx.error
+    info = string.format("%d pixels per fixture%s", shape.pixelCount, parts)
+  elseif fx.group then
+    info = string.format("Fixtures from Group %d  x  %d pixels%s", fx.group, shape.pixelCount, parts)
+  else
+    local gw, gh = P.gridSize(shapeA, fx.slots, rv.gap)
+    info = string.format("%d fixture%s x %d px = %d pixels   |   grid %d x %d%s%s", fx.count,
+      (fx.count == 1) and "" or "s", shape.pixelCount, fx.count * shape.pixelCount, gw, gh, parts,
+      fx.source and ("   |   " .. fx.source) or "")
+  end
+  if not problem and not shape.literal and fx.first then
+    local text, bad = GUI.pixelNote(fx.first, rv.subs, shape.pixelCount)
+    if bad then problem = text elseif text then notes[#notes + 1] = text end
+  end
+  local over = GUI.overwriteList(rv, shape)
+  if #over > 0 then notes[#notes + 1] = "Will overwrite " .. table.concat(over, ", ") .. "." end
+  if rv.group == 0 and rv.layout == 0 and not rv.gridStore and not rv.keepSel then
+    problem = problem or "Tick Group or Layout to store something."
+  end
+  if st.kind == "custom" and #notes == 0 then
+    notes[1] = "/ new row    . empty cell    4-9 run    2.3 nested    Name: new part"
+  end
+  GUI.setStatus(info, problem or GUI.lastResult or table.concat(notes, "    "), problem ~= nil)
+  GUI.setBuildEnabled(problem == nil)
+end
+
+-- Actions ------------------------------------------------------------------------
+function GUI.build()
+  GUI.syncEdits()
+  local st = GUI.state
+  local shape, err = P.buildShape(st.kind, st.shape[st.kind])
+  if not shape then UI.error(err) return end
+  GUI.busy = true
+  GUI.setStatus(nil, "Building ...", false)
+  local plan
+  plan, err = makePlan({ kind = st.kind }, shape, GUI.rigValues())
+  if not plan then
+    GUI.busy = false
+    if err then UI.error(err) end
+    return GUI.refresh()
+  end
+  local foreign = {}
+  for _, e in ipairs(plan.existing) do
+    if not GUI.created[e] then foreign[#foreign + 1] = e end
+  end
+  if #foreign > 0 and not UI.ask(TITLE, "Overwrite " .. table.concat(foreign, ", ") .. "?", "Overwrite", "Cancel") then
+    GUI.busy = false
+    return GUI.refresh()
+  end
+  local ok = execute(plan)
+  GUI.busy = false
+  if ok then
+    local done = {}
+    for _, g in ipairs(plan.groups) do GUI.created["Group " .. g.no] = true end
+    if #plan.groups > 0 then
+      local a, b = plan.groups[1].no, plan.groups[#plan.groups].no
+      done[#done + 1] = (a == b) and ("Group " .. a) or ("Groups " .. a .. "-" .. b)
+    end
+    if plan.layout then
+      GUI.created["Layout " .. plan.layout.no] = true
+      done[#done + 1] = "Layout " .. plan.layout.no
+    end
+    if plan.gridStore then done[#done + 1] = "GridStore" end
+    if #done == 0 then done[1] = "the grid selection" end
+    GUI.lastResult = "Built " .. table.concat(done, ", ") .. "  (" .. #plan.placed .. " pixels)."
+    GUI.saveState()
+  end
+  GUI.leafCache = {}
+  GUI.refresh()
+end
+
+function GUI.firstFixture()
+  local rv = P.coerce(RIG_FIELDS, GUI.rigValues())
+  if not rv then return nil end
+  local fx = GUI.fixtureInfo(rv)
+  return fx.first
+end
+
+function GUI.choosePreset()
+  local entries = {}
+  for _, p in ipairs(USER_PRESETS) do
+    if KIND_INFO[p.kind] then entries[#entries + 1] = { label = p.label, preset = p } end
+  end
+  for _, p in ipairs(PRESETS) do entries[#entries + 1] = { label = p.label, preset = p } end
+  local saved = GUI.loadSaved()
+  for _, p in ipairs(saved) do entries[#entries + 1] = { label = "Saved: " .. p.label, preset = p, name = p.label } end
+  if #saved > 0 then entries[#entries + 1] = { label = "Delete a saved preset...", delete = true } end
+  local items = {}
+  for i, e in ipairs(entries) do items[i] = e.label end
+  local choice = UI.choose("Presets", items, GUI.lastCaller)
+  for _, e in ipairs(entries) do
+    if e.label == choice then
+      if e.delete then return GUI.deletePreset(saved) end
+      GUI.applyPreset(e.preset, e.name)
+      return GUI.render()
+    end
+  end
+end
+
+function GUI.deletePreset(saved)
+  local items = {}
+  for i, p in ipairs(saved) do items[i] = p.label end
+  local choice = UI.choose("Delete a saved preset", items, GUI.lastCaller)
+  if not choice then return end
+  local keep = {}
+  for _, p in ipairs(saved) do
+    if p.label ~= choice then keep[#keep + 1] = p end
+  end
+  GUI.storeSaved(keep)
+  GUI.lastResult = "Deleted preset '" .. choice .. "'."
+  GUI.refresh()
+end
+
+function GUI.savePreset()
+  GUI.syncEdits()
+  local st = GUI.state
+  local ok, name = pcall(TextInput, "Save preset - name", st.presetLabel or st.rig.name or "")
+  name = ok and P.clean(name or "") or ""
+  if name == "" then return end
+  local list = {}
+  for _, p in ipairs(GUI.loadSaved()) do
+    if p.label ~= name then list[#list + 1] = p end
+  end
+  local p = { label = name, kind = st.kind, values = {}, rig = {} }
+  for k, v in pairs(st.shape[st.kind]) do p.values[k] = v end
+  for _, k in ipairs(PRESET_RIG_KEYS) do p.rig[k] = st.rig[k] end
+  list[#list + 1] = p
+  GUI.storeSaved(list)
+  st.presetLabel = name
+  GUI.lastResult = "Saved preset '" .. name .. "' - it's in Presets now."
+  GUI.refresh()
+end
+
+function GUI.step(scope, key, dir)
+  local f = GUI.fieldDef(scope, key)
+  if not f then return end
+  local v = (P.toInt(GUI.value(scope, key)) or f.default) + dir * (f.step or 1)
+  v = math.max(f.guiMin or f.min, math.min(f.max, v))
+  GUI.setValue(scope, key, tostring(v))
+  uiSet(GUI.w.edits[scope .. "_" .. key], { Content = tostring(v) })
+  GUI.lastResult = nil
+  GUI.refresh()
+end
+
+-- Work that opens popups or redraws the window goes through the loop.
+function GUI.request(action, arg)
+  if GUI.busy then return end
+  if GUI.modal then GUI.pending = { action, arg } else GUI.run(action, arg) end
+end
+
+function GUI.run(action, arg)
+  local st = GUI.state
+  if action == "kind" then
+    st.kind, st.presetLabel = arg, nil
+    st.rig.name, st.rig.gap = KIND_INFO[arg].name, KIND_INFO[arg].gap
+    GUI.lastResult = nil
+    GUI.render()
+  elseif action == "adv" then
+    GUI.syncEdits()
+    st.advanced = not st.advanced
+    GUI.render()
+  elseif action == "presets" then
+    GUI.syncEdits()
+    GUI.choosePreset()
+  elseif action == "build" then
+    GUI.build()
+  elseif action == "inspect" then
+    local fid = GUI.firstFixture()
+    if fid then Inspect(fid) else UI.error("Enter the fixtures first, then Inspect shows the first one.") end
+  elseif action == "save" then
+    GUI.savePreset()
+  elseif action == "help" then
+    UI.message(TITLE .. " - help", GUI_HELP)
+  end
+end
+
+function GUI.close()
+  GUI.syncEdits()
+  GUI.saveState()
+  if isValid(GUI.dialog) then pcall(function() Obj.Delete(GUI.overlay, Obj.Index(GUI.dialog)) end) end
+  GUI.dialog = nil
+end
+
+-- Signal handlers ------------------------------------------------------------------
+local function guard(fn)
+  return function(caller, ...)
+    local ok, err = pcall(fn, caller, ...)
+    if not ok then MA.err("Window error: " .. tostring(err)) end
+  end
+end
+
+function GUI.onText(caller)
+  local scope, key = tostring(caller.Name or ""):match("^pgb_txt_(%a+)_(%w+)$")
+  if not scope then return end
+  GUI.setValue(scope, key, tostring(caller.Content or ""))
+  GUI.lastResult = nil
+  GUI.refresh()
+end
+
+function GUI.onToggle(caller)
+  local scope, key = tostring(caller.Name or ""):match("^pgb_chk_(%a+)_(%w+)$")
+  if not scope then return end
+  local state = (tonumber(caller.State) == 1) and 0 or 1
+  uiSet(caller, { State = state })
+  GUI.setValue(scope, key, state == 1)
+  GUI.lastResult = nil
+  GUI.refresh()
+end
+
+function GUI.onClick(caller)
+  local name = tostring(caller.Name or "")
+  GUI.lastCaller = caller
+  local dir, scope, key = name:match("^pgb_(%a%a%a)_(%a+)_(%w+)$")
+  if dir == "inc" or dir == "dec" then return GUI.step(scope, key, (dir == "inc") and 1 or -1) end
+  local kind = name:match("^pgb_kind_(%a+)$")
+  if kind then return GUI.request("kind", kind) end
+  local st = GUI.state
+  if name == "pgb_rotate" then
+    local r = NEXT_ROTATION[(P.toInt(st.rig.rotate) or 0) % 360] or 0
+    st.rig.rotate = tostring(r)
+    uiSet(caller, { Text = "Rotate " .. r })
+    GUI.lastResult = nil
+    GUI.refresh()
+  elseif name == "pgb_sel" then
+    st.rig.fixtures = "sel"
+    uiSet(GUI.w.edits.rig_fixtures, { Content = "sel" })
+    GUI.lastResult = nil
+    GUI.refresh()
+  elseif name == "pgb_close" then
+    GUI.close()
+  else
+    GUI.request((name:gsub("^pgb_", "")))
+  end
+end
+
+local function pickDisplay()
+  local ok, display = pcall(GetFocusDisplay)
+  if not ok then display = nil end
+  local okIndex, index = pcall(function() return Obj.Index(display) end)
+  if display == nil or (okIndex and type(index) == "number" and index > 5) then
+    local okD, d = pcall(GetDisplayByIndex, 1)
+    if okD and d then display = d end
+  end
+  local okO, overlay = pcall(function() return display.ScreenOverlay end)
+  return display, okO and overlay or nil
+end
+
+function GUI.open()
+  GUI.session = GUI.session + 1
+  GUI.pending, GUI.busy, GUI.lastResult = nil, false, nil
+  GUI.state = GUI.loadState()
+  GUI.display, GUI.overlay = pickDisplay()
+  if not GUI.overlay then error("no screen overlay found") end
+  pcall(function() GUI.overlay:ClearUIChildren() end)
+  signalTable[SIG_TEXT] = guard(GUI.onText)
+  signalTable[SIG_TOGGLE] = guard(GUI.onToggle)
+  signalTable[SIG_CLICK] = guard(GUI.onClick)
+  GUI.modal = (coroutine.isyieldable ~= nil) and coroutine.isyieldable() or false
+  GUI.render()
+end
+
+-- Waits while the window is open and runs the work its buttons hand over.
+function GUI.loop()
+  local me, ticks = GUI.session, 0
+  while GUI.session == me and isValid(GUI.dialog) do
+    local job = GUI.pending
+    GUI.pending = nil
+    if job then guard(function() GUI.run(job[1], job[2]) end)() end
+    ticks = ticks + 1
+    -- Keep "sel" up to date when the selection changes elsewhere.
+    if ticks % 20 == 0 and not GUI.busy and P.trim(GUI.state.rig.fixtures):lower() == "sel" then
+      guard(GUI.refresh)()
+    end
+    coroutine.yield(0.05)
+  end
+  if GUI.session == me then GUI.saveState() end
+end
+
+--------------------------------------------------------------------------------
+-- MAIN
+--------------------------------------------------------------------------------
+local function Main(displayHandle, argument)
+  if P.trim(argument):lower() == "classic" then return Classic() end
+  local ok, err = pcall(GUI.open)
+  if not ok then
+    MA.err("Couldn't open the window (" .. tostring(err) .. "). Using the classic dialogs instead.")
+    pcall(GUI.close)
+    return Classic()
+  end
+  if GUI.modal then GUI.loop() end
+end
+
 -- Test hook: lets the offline test suite reach the internals. Never set on a console.
 if type(PGB_TEST_HOOK) == "table" then
-  PGB_TEST_HOOK.P, PGB_TEST_HOOK.MA, PGB_TEST_HOOK.UI = P, MA, UI
+  PGB_TEST_HOOK.P, PGB_TEST_HOOK.MA, PGB_TEST_HOOK.UI, PGB_TEST_HOOK.GUI = P, MA, UI, GUI
   PGB_TEST_HOOK.SETTINGS, PGB_TEST_HOOK.PRESETS, PGB_TEST_HOOK.KIND_INFO = SETTINGS, PRESETS, KIND_INFO
   PGB_TEST_HOOK.makePlan, PGB_TEST_HOOK.execute = makePlan, execute
 end

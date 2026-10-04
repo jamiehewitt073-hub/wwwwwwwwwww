@@ -33,7 +33,7 @@ local function load()
   S.install()
   PGB_TEST_HOOK = {}
   local chunk = assert(loadfile(PLUGIN))
-  local main = chunk("Pixel Grid Builder", "PixelGridBuilder", {}, {})
+  local main = chunk("Pixel Grid Builder", "PixelGridBuilder", S.signals, { component = true })
   local hook = PGB_TEST_HOOK
   PGB_TEST_HOOK = nil
   return S, main, hook
@@ -274,7 +274,7 @@ test("STRIKE M preset: 4 fixtures, auto sub-IDs, groups + part groups + layout",
     mock.form({ Fixtures = "101 Thru 104", ["Group no. (0 = none)"] = 50, ["Layout no. (0 = none)"] = 7 }),
     function(spec) summary = spec.message return { result = 1 } end,
   }
-  main()
+  main(nil, "classic")
   noProblems(S)
   truthy(summary:find("4 fixtures x 42 pixels = 168 cells"), summary)
 
@@ -313,7 +313,7 @@ test("Hex 19 from the selection grid, extra master subfixture, use last 19", fun
     function(spec) truthy(spec.message:find("20 pixels")) return { result = 2 } end, -- Use last 19
     mock.button(1),
   }
-  main()
+  main(nil, "classic")
   noProblems(S)
   local g = S.groups[60]
   eq(#g.cells, 4 * 19)
@@ -338,7 +338,7 @@ test("custom map, rotate 90, alternate, layout only, selection cleared", functio
       ["Group no. (0 = none)"] = 0, ["Layout no. (0 = none)"] = 3, ["Keep the grid selected"] = false }),
     mock.button(1),
   }
-  main()
+  main(nil, "classic")
   noProblems(S)
   eq(next(S.groups), nil, "no groups stored")
   eq(#S.layouts[3].handle._children, 18)
@@ -357,7 +357,7 @@ test("GridStore uses the first fixture's pixels in local grid positions", functi
       ["GridStore shape to fixture type"] = true }),
     mock.button(1),
   }
-  main()
+  main(nil, "classic")
   noProblems(S)
   eq(#S.gridStore, 6)
   for _, e in ipairs(S.gridStore) do truthy(e.addr:find("^Fixture 101%.")) end
@@ -376,7 +376,7 @@ test("existing objects are flagged, missing fixtures skipped", function()
     mock.form({ Fixtures = "1 Thru 3", ["Group no. (0 = none)"] = 9, ["Layout no. (0 = none)"] = 0 }),
     function(spec) summary = spec.message return { result = 0 } end,
   }
-  main()
+  main(nil, "classic")
   truthy(summary:find("WILL BE OVERWRITTEN: Group 9"), summary)
   truthy(summary:find("Skipped, not patched: 2"), summary)
 end)
@@ -392,7 +392,7 @@ test("bad input shows a problem and returns to the form", function()
     function(spec) problem = spec.message return { result = 1 } end,
     mock.form({}, 0),
   }
-  main()
+  main(nil, "classic")
   truthy(problem and problem:find("999"), tostring(problem))
 end)
 
@@ -406,7 +406,7 @@ test("sub-ID list in custom order (face first in patch)", function()
       ["Layout no. (0 = none)"] = 0 }),
     mock.button(1),
   }
-  main()
+  main(nil, "classic")
   noProblems(S)
   local g = S.groups[1]
   eq(cellAt(g.cells, "Fixture 101.15").y, 0, "sub 15 is pixel 1 (top tube)")
@@ -425,7 +425,7 @@ test("Group N as the fixture source keeps its arrangement", function()
     mock.form({ Fixtures = "Group 20", Gap = 0, ["Group no. (0 = none)"] = 21, ["Layout no. (0 = none)"] = 0 }),
     mock.button(1),
   }
-  main()
+  main(nil, "classic")
   noProblems(S)
   local w, h = extent(S.groups[21].cells)
   eq(w, 8); eq(h, 2)
@@ -447,7 +447,7 @@ test("dialogs retry without optional input keys", function()
     mock.form({ Fixtures = "101", ["Group no. (0 = none)"] = 2, ["Layout no. (0 = none)"] = 0 }),
     mock.button(1),
   }
-  main()
+  main(nil, "classic")
   noProblems(S)
   eq(#S.groups[2].cells, 10)
 end)
@@ -459,7 +459,7 @@ test("inspect prints the subfixture tree", function()
   S.texts = { "101" }
   local text
   S.boxes = { function(spec) text = spec.message return { result = 1 } end }
-  main()
+  main(nil, "classic")
   truthy(text:find("29 pixels"), text)
   local all = table.concat(S.log, "\n")
   truthy(all:find("%.2%.14"), all)
@@ -474,18 +474,245 @@ test("remembered values come back next run", function()
     mock.form({ Fixtures = "101", ["Group no. (0 = none)"] = 30, ["Layout no. (0 = none)"] = 0 }),
     mock.button(1),
   }
-  main()
+  main(nil, "classic")
   S.popups = { mock.pick("Pixel line / bar") }
   local shapeSpec, rigSpec
   S.boxes = {
     function(spec) shapeSpec = spec return mock.form({})(spec) end,
     function(spec) rigSpec = spec return { result = 0 } end,
   }
-  main()
+  main(nil, "classic")
   eq(shapeSpec.inputs[1].value, "12")
   local group
   for _, i in ipairs(rigSpec.inputs) do if i.name:find("Group no") then group = i.value end end
   eq(group, "31", "next free group suggested after the last build")
+end)
+
+--------------------------------------------------------------------------------
+-- Window
+--------------------------------------------------------------------------------
+local function info(H) return tostring(H.GUI.w.info.Text) end
+local function note(H) return tostring(H.GUI.w.note.Text) end
+
+-- Runs the plugin inside a coroutine, like the console does.
+local function startModal(main, H)
+  H.SETTINGS.yieldEvery = 0
+  local co = coroutine.create(function() main() end)
+  local ok, err = coroutine.resume(co)
+  assert(ok, err)
+  return function()
+    local ok2, err2 = coroutine.resume(co)
+    assert(ok2, err2)
+    return co
+  end, co
+end
+
+test("window opens: tiles, live info, preview cells", function()
+  local S, main, H = load()
+  for fid = 101, 104 do S.addFixture(fid, 10) end
+  main()
+  eq(S.window()._class, "BaseInput")
+  truthy(S.find("pgb_kind_line")); truthy(S.find("pgb_presets")); truthy(S.find("pgb_build"))
+  eq(S.find("pgb_txt_shape_count").Content, "10")
+  S.type("pgb_txt_rig_fixtures", "101 Thru 104")
+  truthy(info(H):find("4 fixtures x 10 px = 40 pixels", 1, true), info(H))
+  truthy(info(H):find("grid 40 x 1", 1, true), info(H))
+  truthy(note(H):find("Fixture 101: 10 pixels, matches", 1, true), note(H))
+  eq(H.GUI.w.build.Enabled, "Yes")
+  eq(#H.GUI.w.preview._children, 10)
+  eq(H.GUI.w.preview._children[1].Text, "1")
+end)
+
+test("window, run like the console: STRIKE M preset, build, rebuild, close", function()
+  local S, main, H = load()
+  for fid = 101, 104 do S.addFixture(fid, { 14, 14, 14 }) end
+  local step, co = startModal(main, H)
+  truthy(H.GUI.modal, "waits in its loop inside the coroutine")
+  S.popups = { mock.pick("STRIKE M") }
+  S.click("pgb_presets"); step()
+  eq(H.GUI.state.kind, "rows")
+  eq(S.find("pgb_txt_shape_counts").Content, "14,14,14")
+  S.type("pgb_txt_rig_fixtures", "101 Thru 104")
+  S.type("pgb_txt_rig_group", "50")
+  S.type("pgb_txt_rig_layout", "7")
+  truthy(info(H):find("4 fixtures x 42 px = 168 pixels", 1, true), info(H))
+  truthy(info(H):find("grid 59 x 3", 1, true), info(H))
+  truthy(info(H):find("parts: Tubes, Face", 1, true), info(H))
+  eq(#H.GUI.w.preview._children, 42)
+
+  S.click("pgb_build"); step()
+  noProblems(S)
+  eq(#S.groups[50].cells, 168); eq(S.groups[51].name, "StrikeM Tubes"); eq(S.groups[52].name, "StrikeM Face")
+  eq(#S.layouts[7].handle._children, 168)
+  truthy(note(H):find("Built Groups 50-52, Layout 7", 1, true), note(H))
+
+  -- Building again replaces what this window built, without asking.
+  S.click("pgb_build"); step()
+  noProblems(S)
+  eq(#S.groups[50].cells, 168)
+
+  S.click("pgb_close"); step()
+  eq(coroutine.status(co), "dead")
+  eq(S.vars["PGB_gui.kind"], "rows")
+end)
+
+test("window: closing with the title bar X ends the plugin", function()
+  local S, main, H = load()
+  local step, co = startModal(main, H)
+  S.globals.Obj.Delete(S.overlay, 1)
+  step()
+  eq(coroutine.status(co), "dead")
+end)
+
+test("window: bad shape values disable Build and say why", function()
+  local S, main, H = load()
+  S.addFixture(101, 42)
+  main()
+  S.click("pgb_kind_rows")
+  S.type("pgb_txt_shape_counts", "14,x")
+  eq(H.GUI.w.build.Enabled, "No")
+  eq(H.GUI.w.note.TextColor, "errorText")
+  truthy(note(H):find("Pixels per row"), note(H))
+  S.type("pgb_txt_shape_counts", "14,14,14")
+  S.type("pgb_txt_rig_fixtures", "101")
+  eq(H.GUI.w.build.Enabled, "Yes")
+end)
+
+test("window: +/- buttons, advanced view, rotate and flip", function()
+  local S, main, H = load()
+  main()
+  S.click("pgb_kind_line")
+  S.click("pgb_inc_shape_count")
+  eq(S.find("pgb_txt_shape_count").Content, "11")
+  eq(S.find("pgb_rotate"), nil, "advanced is hidden at first")
+  S.click("pgb_adv")
+  local rot = S.click("pgb_rotate")
+  eq(rot.Text, "Rotate 90")
+  truthy(H.GUI.previewSig:find("^1x11"), "preview turned to a vertical line")
+  local flip = S.click("pgb_chk_rig_flipH")
+  eq(flip.State, 1); eq(H.GUI.state.rig.flipH, true)
+  truthy(S.find("pgb_txt_rig_subs")); truthy(S.find("pgb_chk_shape_reverse"))
+  S.click("pgb_adv")
+  eq(S.find("pgb_rotate"), nil)
+end)
+
+test("window: selection is used and keeps its arrangement", function()
+  local S, main, H = load()
+  for fid = 1, 4 do S.addFixture(fid, 6) end
+  S.preselect({ { 1, 0, 0 }, { 2, 1, 0 }, { 3, 0, 1 }, { 4, 1, 1 } })
+  main()
+  eq(S.find("pgb_txt_rig_fixtures").Content, "sel")
+  S.click("pgb_kind_line")
+  truthy(note(H):find("has 6 pixels, the shape 10", 1, true), note(H))
+  S.type("pgb_txt_shape_count", "6")
+  truthy(info(H):find("4 fixtures x 6 px = 24 pixels   |   grid 12 x 2", 1, true), info(H))
+  truthy(info(H):find("selection", 1, true))
+  S.type("pgb_txt_rig_fixtures", "3")
+  S.click("pgb_sel")
+  eq(S.find("pgb_txt_rig_fixtures").Content, "sel")
+end)
+
+test("window: save, apply and delete your own preset", function()
+  local S, main, H = load()
+  main()
+  S.click("pgb_kind_hex")
+  S.type("pgb_txt_rig_name", "MyWash")
+  S.click("pgb_adv")
+  S.click("pgb_inc_shape_start")
+  S.texts = { "My Wash" }
+  S.click("pgb_save")
+  truthy(S.vars["PGB_presets"]:find("My Wash", 1, true))
+  S.click("pgb_kind_line")
+  eq(H.GUI.state.rig.name, "Line")
+  S.popups = { mock.pick("Saved: My Wash") }
+  S.click("pgb_presets")
+  eq(H.GUI.state.kind, "hex"); eq(H.GUI.state.rig.name, "MyWash")
+  eq(tostring(H.GUI.state.shape.hex.start), "30")
+  S.popups = { mock.pick("Delete a saved preset"), mock.pick("My Wash") }
+  S.click("pgb_presets")
+  eq(#H.GUI.loadSaved(), 0)
+end)
+
+test("window: asks before overwriting a group it didn't build", function()
+  local S, main, H = load()
+  S.addFixture(101, 10)
+  S.globals.Cmd("ClearSelection"); S.globals.Cmd("Store Group 5 /Overwrite")
+  main()
+  S.click("pgb_kind_line")
+  S.type("pgb_txt_rig_fixtures", "101")
+  S.type("pgb_txt_rig_group", "5")
+  S.click("pgb_chk_rig_layoutOn")
+  truthy(note(H):find("Will overwrite Group 5", 1, true), note(H))
+  local asked
+  S.boxes = { function(spec) asked = spec.message return { result = 0 } end }
+  S.click("pgb_build")
+  truthy(asked and asked:find("Group 5"))
+  eq(#S.groups[5].cells, 0, "cancelled")
+  S.boxes = { mock.button(1) }
+  S.click("pgb_build")
+  eq(#S.groups[5].cells, 10)
+  eq(S.layouts[1], nil, "layout was unticked")
+end)
+
+test("window: Group N as source, custom map labels, too-big preview", function()
+  local S, main, H = load()
+  for fid = 1, 2 do S.addFixture(fid, 9) end
+  S.preselect({ { 1, 0, 0 }, { 2, 0, 1 } })
+  S.globals.Cmd("Store Group 20 /Overwrite")
+  S.globals.Cmd("ClearSelection")
+  main()
+  S.click("pgb_kind_custom")
+  S.type("pgb_txt_shape_map", "Ring: 1 2 3 / 8 . 4 / 7 6 5 // Center: 9")
+  eq(H.GUI.w.preview._children[1].Text, "1")
+  S.type("pgb_txt_rig_fixtures", "Group 20")
+  truthy(info(H):find("Fixtures from Group 20", 1, true), info(H))
+  S.type("pgb_txt_rig_group", "30")
+  S.click("pgb_build")
+  noProblems(S)
+  local w, h = extent(S.groups[30].cells)
+  eq(w, 3); eq(h, 5 * 2 + 1, "two fixtures stacked as in the group")
+  S.click("pgb_kind_line")
+  S.type("pgb_txt_shape_count", "200")
+  eq(#H.GUI.w.preview._children, 1)
+  truthy(H.GUI.w.preview._children[1].Text:find("too big"))
+end)
+
+test("window: Inspect button shows the first fixture", function()
+  local S, main, H = load()
+  S.addFixture(101, { 14, 14, 14 })
+  main()
+  S.type("pgb_txt_rig_fixtures", "101")
+  S.click("pgb_adv")
+  local text
+  S.boxes = { function(spec) text = spec.message return { result = 1 } end }
+  S.click("pgb_inspect")
+  truthy(text and text:find("42 pixels"), tostring(text))
+end)
+
+test("window: change signals while the window is built don't misplace the preview", function()
+  local S, main, H = load()
+  S.addFixture(101, 10)
+  S.fireOnContent = true
+  main()
+  S.click("pgb_adv")
+  local preview = H.GUI.w.preview
+  eq(preview.Anchors, "0," .. H.GUI.w.previewRow)
+  local grids = 0
+  for _, c in ipairs(H.GUI.w.frame._children) do
+    if c.Anchors == "0," .. H.GUI.w.previewRow then grids = grids + 1 end
+  end
+  eq(grids, 1, "exactly one thing in the preview row")
+  eq(#S.errors, 0, table.concat(S.errors, " | "))
+end)
+
+test("falls back to the classic dialogs if the window can't open", function()
+  local S, main = load()
+  S.failAppend = true
+  local title
+  S.popups = { function(spec) title = spec.title return nil end }
+  main()
+  truthy(title and title:find("what are you building"), tostring(title))
+  truthy(table.concat(S.errors, "\n"):find("Couldn't open the window", 1, true))
 end)
 
 print(string.format("\n%d passed, %d failed", passed, failed))
